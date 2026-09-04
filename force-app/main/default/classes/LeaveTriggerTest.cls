@@ -2,8 +2,13 @@
 public class LeaveTriggerTest {
     static testMethod void testInsert() {
         
-        Employee__c empRecord = new Employee__c(Leave_Balance__c = 20);
-       	insert empRecord;
+        Employee__c empRecord = new Employee__c(
+            Leave_Balance__c = 10,
+            orgChartId__c = 31,
+            Emergency_Contact_Relation__c = 'Father',
+            Emergency_Contact_Number__c = '9999999999'
+        );
+        insert empRecord;
        
         Leave__c leaveRecord = new Leave__c(Employee__c = empRecord.Id, Start_Date__c = system.today(),
                                             End_Date__c = system.today()+2 , Leave_Type__c = 'HL(Half-day leave)');
@@ -24,8 +29,13 @@ public class LeaveTriggerTest {
     }
 
     static testMethod void testUpdate() {
-        Employee__c empRecord = new Employee__c(Leave_Balance__c = 20);
-       	insert empRecord;
+        Employee__c empRecord = new Employee__c(
+            Leave_Balance__c = 10,
+            orgChartId__c = 11,
+            Emergency_Contact_Relation__c = 'Father',
+            Emergency_Contact_Number__c = '9999999999'
+        );
+        insert empRecord;
         Leave__c leaveRecord = new Leave__c(Employee__c = empRecord.Id, Start_Date__c = system.today(),
                                             End_Date__c = system.today()+2 , Leave_Type__c = 'HL(Half-day leave)');
         insert leaveRecord;
@@ -38,8 +48,13 @@ public class LeaveTriggerTest {
     }
 
     static testMethod void testDelete() {
-        
-        Employee__c empRecord = new Employee__c(Leave_Balance__c = 20);
+    
+        Employee__c empRecord = new Employee__c(
+            Leave_Balance__c = 20,
+            orgChartId__c = 21,
+            Emergency_Contact_Relation__c = 'Father',
+            Emergency_Contact_Number__c = '9999999999'
+        );
        	insert empRecord;
         Leave__c leaveRecord = new Leave__c(Employee__c = empRecord.Id, Start_Date__c = system.today(),
                                             End_Date__c = system.today()+2 , Leave_Type__c = 'HL(Half-day leave)');

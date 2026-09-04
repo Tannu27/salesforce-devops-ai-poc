@@ -1,0 +1,29 @@
+name: Deploy to UAT
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+
+      - name: Install Salesforce CLI
+        run: npm install -g @salesforce/cli
+
+      - name: Authenticate UAT Sandbox
+        run: | 
+          echo "${{ secrets.SFDX_AUTH_URL_UAT }}" > auth.txt
+          sf org login sfdx-url --sfdx-url-file auth.txt --alias uat
+
+      - name: Deploy to UAT
+        run: |
+          sf project deploy start \
+            --source-dir force-app \
+            --target-org uat \
+            --ignore-conflicts
