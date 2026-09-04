@@ -56,6 +56,7 @@ public class LeaveTriggerTest {
             Emergency_Contact_Number__c = '9999999999'
         );
        	insert empRecord;
+        
         Leave__c leaveRecord = new Leave__c(Employee__c = empRecord.Id, Start_Date__c = system.today(),
                                             End_Date__c = system.today()+2 , Leave_Type__c = 'HL(Half-day leave)');
         insert leaveRecord;

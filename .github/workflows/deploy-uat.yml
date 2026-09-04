@@ -49,7 +49,11 @@ jobs:
 
       - name: Deploy Delta
         run: |
-          sf project deploy start \
-            --manifest delta/package/package.xml \
-            --target-org uat \
-            --ignore-conflicts
+          if [ -f "delta/package/package.xml" ] && grep -q "<types>" delta/package/package.xml; then
+            sf project deploy start \
+              --manifest delta/package/package.xml \
+              --target-org uat \
+              --ignore-conflicts
+          else
+            echo "No Salesforce metadata changes found. Skipping deployment."
+          fi
