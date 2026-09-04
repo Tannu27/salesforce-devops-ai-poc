@@ -12,18 +12,48 @@ jobs:
     steps:
       - name: Checkout Source
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install Salesforce CLI
         run: npm install -g @salesforce/cli
 
+      - name: Install SGD
+        run: echo y | sf plugins install sfdx-git-delta
+
       - name: Authenticate UAT Sandbox
-        run: | 
+        run: |
           echo "${{ secrets.SFDX_AUTH_URL_UAT }}" > auth.txt
           sf org login sfdx-url --sfdx-url-file auth.txt --alias uat
 
-      - name: Deploy to UAT
+      - name: Generate Delta
         run: |
-          sf project deploy start \
-            --source-dir force-app \
-            --target-org uat \
-            --ignore-conflicts
+          mkdir delta
+          sf sgd source delta \
+            --to "${{ github.sha }}" \
+            --from "${{ github.event.before }}" \
+            --output-dir delta
+
+      - name: Show Delta Package
+        run: |
+          cat delta/package/package.xml
+
+      - name: Check for Metadata Changes
+        run: |
+          if grep -q "<types>" delta/package/package.xml; then
+            echo "Metadata changes found."
+          else
+            echo "No Salesforce metadata changes found. Skipping deployment."
+            exit 0
+          fi
+
+      - name: Deploy Delta
+        run: |
+          if [ -f "delta/package/package.xml" ] && grep -q "<types>" delta/package/package.xml; then
+            sf project deploy start \
+              --manifest delta/package/package.xml \
+              --target-org uat \
+              --ignore-conflicts
+          else
+            echo "No Salesforce metadata changes found. Skipping deployment."
+          fi
