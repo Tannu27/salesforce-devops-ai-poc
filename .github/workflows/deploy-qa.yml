@@ -10,18 +10,37 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install Salesforce CLI
         run: npm install -g @salesforce/cli
 
-      - name: Authenticate QA
+      - name: Install SGD
+        run: echo y | sf plugins install sfdx-git-delta
+
+      - name: Authenticate QA Sandbox
         run: |
           echo "${{ secrets.SFDX_AUTH_URL_QA }}" > auth.txt
           sf org login sfdx-url --sfdx-url-file auth.txt --alias qa
 
-      - name: Deploy to QA
+      - name: Generate Delta
+        run: |
+          mkdir delta
+          sf sgd source delta \
+            --to HEAD \
+            --from HEAD~1 \
+            --output-dir delta
+
+      - name: Show Delta Package
+        run: |
+          cat delta/package/package.xml
+
+      - name: Deploy Delta
         run: |
           sf project deploy start \
-            --source-dir force-app \
-            --target-org qa
+            --manifest delta/package/package.xml \
+            --target-org qa \
+            --ignore-conflicts
