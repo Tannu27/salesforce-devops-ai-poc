@@ -24,5 +24,6 @@ jobs:
       - name: Validate Deployment
         run: |
           sf project deploy validate \
+            --source-dir force-app \
             --target-org qa \
             --test-level RunLocalTests
