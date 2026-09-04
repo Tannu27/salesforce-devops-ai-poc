@@ -26,4 +26,4 @@ jobs:
          sf project deploy validate \
             --source-dir force-app \
             --target-org qa \
-            --test-level NoTestRun
+            --test-level RunRelevantTests
