@@ -25,7 +25,6 @@ jobs:
       - name: Generate PR Diff
         run: |
           git fetch origin "${{ github.base_ref }}"
-
           git diff origin/${{ github.base_ref }}...HEAD > pr.diff
 
           echo "Diff Size:"
@@ -35,32 +34,29 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          DIFF=$(head -c 30000 pr.diff)
+          DIFF=$(head -c 25000 pr.diff)
 
           jq -n \
             --arg diff "$DIFF" \
             '{
               contents: [{
                 parts: [{
-                  text:
-                  ("You are a Senior Salesforce Architect.\n\n" +
-                   "Review this Salesforce Pull Request and identify:\n" +
-                   "- Apex best practice violations\n" +
-                   "- Bulkification issues\n" +
-                   "- SOQL/DML inside loops\n" +
-                   "- Governor limit risks\n" +
-                   "- Security vulnerabilities\n" +
-                   "- LWC best practice issues\n" +
-                   "- Flow best practice issues\n" +
-                   "- Performance concerns\n" +
-                   "- Code quality improvements\n\n" +
-                   "For every finding provide:\n" +
-                   "Severity: High / Medium / Low\n" +
-                   "Issue\n" +
-                   "Recommendation\n\n" +
-                   "If no issues are found, state that clearly.\n\n" +
-                   "PR Diff:\n\n" +
-                   $diff)
+                  text: (
+                    "You are a Senior Salesforce Architect.\n\n" +
+                    "Review this Salesforce Pull Request.\n\n" +
+                    "Check:\n" +
+                    "- Apex best practices\n" +
+                    "- Bulkification\n" +
+                    "- SOQL/DML in loops\n" +
+                    "- Security issues\n" +
+                    "- Governor limits\n" +
+                    "- LWC best practices\n" +
+                    "- Flow best practices\n" +
+                    "- Performance issues\n\n" +
+                    "Provide Severity (High/Medium/Low).\n\n" +
+                    "PR Diff:\n\n" +
+                    $diff
+                  )
                 }]
               }]
             }' > request.json
@@ -72,13 +68,11 @@ jobs:
             -d @request.json \
             > review.json
 
-          echo "===== GEMINI RESPONSE ====="
           cat review.json
 
       - name: Extract Review
-        id: extract
         run: |
-          REVIEW=$(jq -r '
+          jq -r '
             if .candidates then
               .candidates[0].content.parts[0].text
             elif .error then
@@ -86,25 +80,24 @@ jobs:
             else
               "No review generated."
             end
-          ' review.json)
+          ' review.json > review.txt
 
-          {
-            echo "review<<EOF"
-            echo "$REVIEW"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
+          echo "===== REVIEW ====="
+          cat review.txt
 
       - name: Comment on PR
         uses: actions/github-script@v7
-        env:
-          REVIEW: ${{ steps.extract.outputs.review }}
         with:
           script: |
+            const fs = require('fs');
+
+            const review = fs.readFileSync('review.txt', 'utf8');
+
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.payload.pull_request.number,
               body: `## 🤖 AI Code Review
 
-${process.env.REVIEW}`
+${review}`
             });
