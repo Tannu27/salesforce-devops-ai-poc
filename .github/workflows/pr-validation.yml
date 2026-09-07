@@ -53,22 +53,29 @@ jobs:
 
       - name: Run Salesforce Code Analyzer
         if: steps.changed-files.outputs.files != ''
+        continue-on-error: true
         run: |
           echo "Running scanner on changed Apex files..."
 
           sf scanner run \
             --target "${{ steps.changed-files.outputs.files }}" \
             --severity-threshold 3 \
-            --format table || true
+            --format table
+
+      - name: Check SGD Plugin
+        run: |
+          sf plugins
 
       - name: Generate Delta Package
         run: |
-          sf sgd source delta \
-            --from origin/${{ github.base_ref }} \
-            --to HEAD \
-            --output-dir delta
+          mkdir -p delta
 
-      - name: Check Package Exists
+          sf sgd source delta \
+            --from "origin/${{ github.base_ref }}" \
+            --to "HEAD" \
+            --output-dir "delta"
+
+      - name: Verify Delta Package
         run: |
           ls -R delta
 
