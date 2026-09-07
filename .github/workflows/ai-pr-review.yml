@@ -33,33 +33,44 @@ jobs:
         run: |
           DIFF=$(head -c 30000 pr.diff)
 
+          cat > request.json <<EOF
+          {
+            "contents": [
+              {
+                "parts": [
+                  {
+                    "text": "You are a Senior Salesforce Architect.
+
+Review this Salesforce Pull Request and identify:
+
+1. Apex best practice violations
+2. Bulkification issues
+3. SOQL/DML inside loops
+4. Governor limit risks
+5. Security vulnerabilities
+6. LWC best practice issues
+7. Flow best practice issues
+8. Performance concerns
+9. Code quality improvements
+
+Provide findings with Severity (High/Medium/Low).
+
+PR Diff:
+
+${DIFF}"
+                  }
+                ]
+              }
+            ]
+          }
+          EOF
+
           curl -s \
             -X POST \
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${GEMINI_API_KEY}" \
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}" \
             -H "Content-Type: application/json" \
-            -d "$(jq -n --arg diff "$DIFF" '{
-              contents: [
-                {
-                  parts: [
-                    {
-                      text:
-                      "You are a Senior Salesforce Architect. Review this Salesforce PR for:
-                      1. Apex best practices
-                      2. Bulkification issues
-                      3. SOQL/DML in loops
-                      4. Security issues
-                      5. Governor limits
-                      6. LWC best practices
-                      7. Flow best practices
-
-                      PR Diff:
-
-                      \($diff)"
-                    }
-                  ]
-                }
-              ]
-            }')" > review.json
+            -d @request.json \
+            > review.json
 
           echo "Gemini Response:"
           cat review.json
@@ -70,8 +81,10 @@ jobs:
           REVIEW=$(jq -r '
             if .candidates then
               .candidates[0].content.parts[0].text
-            else
+            elif .error then
               .error.message
+            else
+              "No review generated."
             end
           ' review.json)
 
@@ -79,18 +92,19 @@ jobs:
             echo "review<<EOF"
             echo "$REVIEW"
             echo "EOF"
-          } >> $GITHUB_OUTPUT
+          } >> "$GITHUB_OUTPUT"
 
       - name: Comment on PR
         uses: actions/github-script@v7
         with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const review = `${{ steps.extract.outputs.review }}`;
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: context.issue.number,
+              issue_number: context.payload.pull_request.number,
               body: `## 🤖 AI Code Review
 
 ${review}`
