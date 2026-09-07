@@ -1,0 +1,44 @@
+name: AI PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  ai-review:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+
+      - name: Get PR Diff
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          git diff origin/${{ github.base_ref }}...HEAD > pr.diff
+
+      - name: Review with AI
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          DIFF=$(cat pr.diff)
+
+          RESPONSE=$(curl https://api.openai.com/v1/chat/completions \
+            -s \
+            -H "Authorization: Bearer $OPENAI_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"model\":\"gpt-4.1-mini\",
+              \"messages\":[
+                {
+                  \"role\":\"system\",
+                  \"content\":\"You are a senior Salesforce architect. Review Salesforce Apex, LWC, Flow, Validation Rules and metadata changes. Identify bugs, security issues, bulkification issues and best practice violations.\"
+                },
+                {
+                  \"role\":\"user\",
+                  \"content\":\"Review this PR diff:\n$DIFF\"
+                }
+              ]
+            }")
+
+          echo "$RESPONSE"
