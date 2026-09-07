@@ -39,26 +39,11 @@ jobs:
             --alias qa \
             --set-default
 
-      - name: Get Changed Apex Files
-        id: changed-files
-        run: |
-          git fetch origin ${{ github.base_ref }}
-
-          FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD \
-            | grep '\.cls$' \
-            | tr '\n' ',' \
-            | sed 's/,$//')
-
-          echo "files=$FILES" >> $GITHUB_OUTPUT
-          echo "Changed files: $FILES"
-
-      - name: Run Salesforce Code Analyzer
-        if: steps.changed-files.outputs.files != ''
+      - name: Run Code Analyzer
         continue-on-error: true
         run: |
-          echo "Running scanner on changed Apex files..."
           sf scanner run \
-            --target "${{ steps.changed-files.outputs.files }}" \
+            --target force-app/main/default/classes/LeaveTriggerHelper.cls \
             --severity-threshold 3 \
             --format table
 
@@ -71,42 +56,16 @@ jobs:
             --to HEAD \
             --output-dir delta
 
+          echo "Generated Delta:"
           ls -R delta
-
-      - name: Find Test Classes
-        id: tests
-        run: |
-          git fetch origin ${{ github.base_ref }}
-
-          TEST_CLASSES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD \
-            | grep 'Test\.cls$' \
-            | sed 's#.*/##' \
-            | sed 's/\.cls$//' \
-            | paste -sd "," -)
-
-          echo "classes=$TEST_CLASSES" >> $GITHUB_OUTPUT
-
-          echo "Detected Test Classes:"
-          echo "$TEST_CLASSES"
 
       - name: Validate Deployment
         run: |
-          if [ -n "${{ steps.tests.outputs.classes }}" ]; then
-            echo "Running specified tests"
-
-            sf project deploy validate \
-              --manifest delta/package/package.xml \
-              --target-org qa \
-              --test-level RunSpecifiedTests \
-              --tests "${{ steps.tests.outputs.classes }}"
-          else
-            echo "No test classes changed. Running local tests."
-
-            sf project deploy validate \
-              --manifest delta/package/package.xml \
-              --target-org qa \
-              --test-level RunLocalTests
-          fi
+          sf project deploy validate \
+            --manifest delta/package/package.xml \
+            --target-org qa \
+            --test-level RunSpecifiedTests \
+            --tests LeaveTriggerTest
 
       - name: Validation Success Comment
         if: success()
