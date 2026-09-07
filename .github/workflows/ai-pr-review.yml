@@ -1,0 +1,94 @@
+name: AI PR Review
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  ai-review:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate PR Diff
+        run: |
+          git fetch origin "${{ github.base_ref }}"
+          git diff origin/${{ github.base_ref }}...HEAD > pr.diff
+
+          echo "Diff Size:"
+          wc -c pr.diff
+
+      - name: Review with Gemini
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          DIFF=$(head -c 25000 pr.diff)
+
+          PROMPT="You are a Senior Salesforce Architect. Review this Salesforce PR and identify Apex issues, security issues, bulkification issues, SOQL/DML in loops, governor limit risks, LWC issues, Flow issues and best practice violations. PR Diff: $DIFF"
+
+          jq -n \
+            --arg prompt "$PROMPT" \
+            '{
+              contents: [
+                {
+                  parts: [
+                    {
+                      text: $prompt
+                    }
+                  ]
+                }
+              ]
+            }' > payload.json
+
+          curl -s \
+          -X POST \
+          "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${GEMINI_API_KEY}" \
+          -H "Content-Type: application/json" \
+          -d @payload.json > review.json
+
+          echo "===== GEMINI RESPONSE ====="
+          cat review.json
+
+      - name: Extract Review
+        id: extract
+        run: |
+          REVIEW=$(jq -r '
+            if .candidates then
+              .candidates[0].content.parts[0].text
+            elif .error then
+              .error.message
+            else
+              "No review generated."
+            end
+          ' review.json)
+
+          {
+            echo "review<<EOF"
+            echo "$REVIEW"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        env:
+          REVIEW_TEXT: ${{ steps.extract.outputs.review }}
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: "## 🤖 AI Code Review\n\n" + process.env.REVIEW_TEXT
+            })
