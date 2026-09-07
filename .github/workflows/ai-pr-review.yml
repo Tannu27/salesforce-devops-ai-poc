@@ -2,7 +2,7 @@ name: AI PR Review
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
@@ -22,6 +22,7 @@ jobs:
       - name: Generate PR Diff
         run: |
           git fetch origin ${{ github.base_ref }}
+
           git diff origin/${{ github.base_ref }}...HEAD > pr.diff
 
           echo "Diff Size:"
@@ -31,7 +32,7 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          DIFF=$(head -c 25000 pr.diff)
+          DIFF=$(head -c 30000 pr.diff)
 
           cat > request.json <<EOF
           {
@@ -39,7 +40,7 @@ jobs:
               {
                 "parts": [
                   {
-                    "text": "You are a Senior Salesforce Architect. Review the following Salesforce PR changes. Check for: Apex best practices, bulkification, SOQL inside loops, governor limits, security issues, sharing model concerns, Flow issues, LWC issues, code quality, missing test coverage, deployment risks. Provide findings in markdown format.\n\n$DIFF"
+                    "text": "You are a Senior Salesforce Architect. Review this Salesforce pull request. Check Apex best practices, SOQL usage, governor limits, bulkification, security, sharing, Flow design, LWC quality, deployment risks, and missing test coverage. Provide concise findings in markdown.\n\n$DIFF"
                   }
                 ]
               }
@@ -49,20 +50,29 @@ jobs:
 
           curl -s \
             -X POST \
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$GEMINI_API_KEY" \
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=$GEMINI_API_KEY" \
             -H "Content-Type: application/json" \
             -d @request.json > review.json
 
+          echo "Gemini Response:"
           cat review.json
 
       - name: Extract Review
-        run: |
-          REVIEW=$(jq -r '.candidates[0].content.parts[0].text // "No issues found."' review.json)
-
-          echo "review<<EOF" >> $GITHUB_OUTPUT
-          echo "$REVIEW" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
         id: extract
+        run: |
+          REVIEW=$(jq -r '
+            if .candidates then
+              .candidates[0].content.parts[0].text
+            else
+              .error.message
+            end
+          ' review.json)
+
+          {
+            echo "review<<EOF"
+            echo "$REVIEW"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
 
       - name: Post PR Comment
         uses: actions/github-script@v7
