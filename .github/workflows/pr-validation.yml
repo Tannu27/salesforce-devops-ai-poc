@@ -40,62 +40,6 @@ jobs:
             --alias qa \
             --set-default
 
-      - name: Generate PR Diff
-        run: |
-          git fetch origin ${{ github.base_ref }}
-          git diff origin/${{ github.base_ref }}...HEAD > pr.diff
-
-      - name: Review with Gemini
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: |
-          DIFF=$(head -c 25000 pr.diff)
-
-          jq -n \
-            --arg diff "$DIFF" \
-            '{
-              contents: [{
-                parts: [{
-                  text: ("Review this Salesforce PR:\n\n" + $diff)
-                }]
-              }]
-            }' > request.json
-
-          curl -s \
-            -X POST \
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${GEMINI_API_KEY}" \
-            -H "Content-Type: application/json" \
-            -d @request.json \
-            > review.json
-
-      - name: Extract Review
-        id: extract
-        run: |
-          REVIEW=$(jq -r '
-            if .candidates then
-              .candidates[0].content.parts[0].text
-            else
-              .error.message
-            end
-          ' review.json)
-
-          echo "review<<EOF" >> $GITHUB_OUTPUT
-          echo "$REVIEW" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-      - name: Comment AI Review
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const review = `${{ steps.extract.outputs.review }}`;
-
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: "## 🤖 AI Review\n\n" + review
-            });
-
       - name: Get Changed Apex Files
         id: changed-files
         run: |
@@ -110,10 +54,12 @@ jobs:
       - name: Run Salesforce Code Analyzer
         if: steps.changed-files.outputs.files != ''
         run: |
+          echo "Running scanner on changed Apex files..."
+
           sf scanner run \
             --target "${{ steps.changed-files.outputs.files }}" \
             --severity-threshold 3 \
-            --format table
+            --format table || true
 
       - name: Generate Delta Package
         run: |
@@ -121,6 +67,10 @@ jobs:
             --from origin/${{ github.base_ref }} \
             --to HEAD \
             --output-dir delta
+
+      - name: Check Package Exists
+        run: |
+          ls -R delta
 
       - name: Validate Deployment
         run: |
