@@ -1,12 +1,17 @@
-name: PR Validation
+name: Salesforce PR Validation
 
 on:
   pull_request:
     branches:
       - develop
 
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
 jobs:
-  validate:
+  validate-pr:
     runs-on: ubuntu-latest
 
     steps:
@@ -15,101 +20,187 @@ jobs:
         with:
           fetch-depth: 0
 
+      # ----------------------------------
+      # Install Salesforce CLI
+      # ----------------------------------
       - name: Install Salesforce CLI
-        run: npm install -g @salesforce/cli
+        run: |
+          npm install -g @salesforce/cli
 
-      - name: Install SGD
-        run: echo y | sf plugins install sfdx-git-delta
+      # ----------------------------------
+      # Install SFDX Git Delta
+      # ----------------------------------
+      - name: Install SFDX Git Delta
+        run: |
+          echo y | sf plugins install sfdx-git-delta
 
+      # ----------------------------------
+      # Install Code Analyzer
+      # ----------------------------------
       - name: Install Salesforce Code Analyzer
-        run: echo y | sf plugins install @salesforce/sfdx-scanner
+        run: |
+          sf plugins install @salesforce/sfdx-scanner
 
-      - name: Authenticate QA Sandbox
+      # ----------------------------------
+      # Authenticate QA Org
+      # ----------------------------------
+      - name: Authenticate QA Org
         run: |
           echo "${{ secrets.SFDX_AUTH_URL_QA }}" > auth.txt
+
           sf org login sfdx-url \
             --sfdx-url-file auth.txt \
-            --alias qa
+            --alias qa \
+            --set-default
 
-      - name: Generate Delta
+      # ----------------------------------
+      # AI Review
+      # ----------------------------------
+      - name: Generate PR Diff
         run: |
-          mkdir delta
+          git fetch origin ${{ github.base_ref }}
+          git diff origin/${{ github.base_ref }}...HEAD > pr.diff
 
+      - name: Review with Gemini
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+
+          DIFF=$(head -c 25000 pr.diff)
+
+          jq -n \
+            --arg diff "$DIFF" \
+            '{
+              contents: [
+                {
+                  parts: [
+                    {
+                      text:
+                      ("Review this Salesforce PR for:\n\n" +
+                      "1. Apex best practices\n" +
+                      "2. Bulkification issues\n" +
+                      "3. SOQL/DML in loops\n" +
+                      "4. Security issues\n" +
+                      "5. Governor limits\n\n" +
+                      $diff)
+                    }
+                  ]
+                }
+              ]
+            }' > request.json
+
+          curl -s \
+            -X POST \
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${GEMINI_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d @request.json \
+            > review.json
+
+      - name: Extract Review
+        id: extract
+        run: |
+          REVIEW=$(jq -r '
+            if .candidates then
+              .candidates[0].content.parts[0].text
+            else
+              .error.message
+            end
+          ' review.json)
+
+          {
+            echo "review<<EOF"
+            echo "$REVIEW"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+      - name: Comment AI Review
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## 🤖 AI Review
+
+${{ steps.extract.outputs.review }}`
+            });
+
+      # ----------------------------------
+      # Find Changed Apex Classes
+      # ----------------------------------
+      - name: Get Changed Apex Files
+        id: changed-files
+        run: |
+          git fetch origin ${{ github.base_ref }}
+
+          FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD \
+            | grep '\.cls$' \
+            | tr '\n' ',' \
+            | sed 's/,$//')
+
+          echo "files=$FILES" >> $GITHUB_OUTPUT
+
+          echo "Changed Apex Files:"
+          echo "$FILES"
+
+      # ----------------------------------
+      # Run Code Analyzer
+      # ----------------------------------
+      - name: Run Salesforce Code Analyzer
+        if: steps.changed-files.outputs.files != ''
+        run: |
+          sf scanner run \
+            --target "${{ steps.changed-files.outputs.files }}" \
+            --severity-threshold 2 \
+            --format table
+
+      # ----------------------------------
+      # Create Delta Package
+      # ----------------------------------
+      - name: Generate Delta Package
+        run: |
           sf sgd source delta \
+            --from origin/${{ github.base_ref }} \
             --to HEAD \
-            --from HEAD~1 \
             --output-dir delta
 
-      - name: Show Delta Package
+      # ----------------------------------
+      # Validate Deployment
+      # ----------------------------------
+      - name: Validate Deployment to QA
         run: |
-          cat delta/package/package.xml || true
+          sf project deploy validate \
+            --manifest delta/package/package.xml \
+            --target-org qa \
+            --test-level RunLocalTests
 
-      - name: Run Code Analyzer
-        run: |
-          FILES=$(find force-app/main/default/classes -name "*.cls" | tr '\n' ',' | sed 's/,$//')
+      # ----------------------------------
+      # Success Comment
+      # ----------------------------------
+      - name: Validation Success Comment
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '✅ PR Validation Passed'
+            });
 
-          if [ -n "$FILES" ]; then
-            sf scanner run \
-              --target "$FILES" \
-              --severity-threshold 2 \
-              --format table
-          else
-            echo "No Apex classes found."
-          fi
-
-      - name: Detect Test Classes
-        id: tests
-        run: |
-          TEST_CLASSES=""
-
-          CHANGED_CLASSES=$(git diff --name-only HEAD~1 HEAD | grep "\.cls$" || true)
-
-          echo "Changed Classes:"
-          echo "$CHANGED_CLASSES"
-
-          for FILE in $CHANGED_CLASSES
-          do
-            CLASS=$(basename "$FILE" .cls)
-
-            if [[ "$CLASS" != *Test ]]; then
-
-              TEST_CLASS="${CLASS/Helper/Test}"
-
-              if grep -Rq "class $TEST_CLASS" force-app/main/default/classes; then
-                TEST_CLASSES="${TEST_CLASSES}${TEST_CLASS},"
-              fi
-
-            fi
-          done
-
-          TEST_CLASSES=$(echo "$TEST_CLASSES" | sed 's/,$//')
-
-          echo "Detected Tests: $TEST_CLASSES"
-
-          echo "TEST_CLASSES=$TEST_CLASSES" >> $GITHUB_ENV
-
-      - name: Validate Deployment
-        run: |
-          if [ -f "delta/package/package.xml" ] && grep -q "<types>" delta/package/package.xml; then
-
-            if [ -n "$TEST_CLASSES" ]; then
-
-              echo "Running Tests: $TEST_CLASSES"
-
-              sf project deploy validate \
-                --manifest delta/package/package.xml \
-                --target-org qa \
-                --test-level RunSpecifiedTests \
-                --tests "$TEST_CLASSES"
-
-            else
-
-              echo "No mapped test classes found."
-              exit 1
-
-            fi
-
-          else
-
-            echo "No Salesforce metadata changes found."
-          fi
+      # ----------------------------------
+      # Failure Comment
+      # ----------------------------------
+      - name: Validation Failure Comment
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '❌ PR Validation Failed. Check GitHub Actions logs.'
+            });
