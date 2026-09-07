@@ -22,7 +22,6 @@ jobs:
       - name: Generate PR Diff
         run: |
           git fetch origin ${{ github.base_ref }}
-
           git diff origin/${{ github.base_ref }}...HEAD > pr.diff
 
           echo "Diff Size:"
@@ -34,25 +33,33 @@ jobs:
         run: |
           DIFF=$(head -c 30000 pr.diff)
 
-          cat > request.json <<EOF
-          {
-            "contents": [
-              {
-                "parts": [
-                  {
-                    "text": "You are a Senior Salesforce Architect. Review this Salesforce pull request. Check Apex best practices, SOQL usage, governor limits, bulkification, security, sharing, Flow design, LWC quality, deployment risks, and missing test coverage. Provide concise findings in markdown.\n\n$DIFF"
-                  }
-                ]
-              }
-            ]
-          }
-          EOF
-
           curl -s \
             -X POST \
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=$GEMINI_API_KEY" \
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${GEMINI_API_KEY}" \
             -H "Content-Type: application/json" \
-            -d @request.json > review.json
+            -d "$(jq -n --arg diff "$DIFF" '{
+              contents: [
+                {
+                  parts: [
+                    {
+                      text:
+                      "You are a Senior Salesforce Architect. Review this Salesforce PR for:
+                      1. Apex best practices
+                      2. Bulkification issues
+                      3. SOQL/DML in loops
+                      4. Security issues
+                      5. Governor limits
+                      6. LWC best practices
+                      7. Flow best practices
+
+                      PR Diff:
+
+                      \($diff)"
+                    }
+                  ]
+                }
+              ]
+            }')" > review.json
 
           echo "Gemini Response:"
           cat review.json
@@ -74,15 +81,17 @@ jobs:
             echo "EOF"
           } >> $GITHUB_OUTPUT
 
-      - name: Post PR Comment
+      - name: Comment on PR
         uses: actions/github-script@v7
         with:
           script: |
             const review = `${{ steps.extract.outputs.review }}`;
 
-            github.rest.issues.createComment({
+            await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `## 🤖 AI Code Review\n\n${review}`
+              body: `## 🤖 AI Code Review
+
+${review}`
             });
