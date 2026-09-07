@@ -34,7 +34,6 @@ jobs:
       - name: Authenticate QA Org
         run: |
           echo "${{ secrets.SFDX_AUTH_URL_QA }}" > auth.txt
-
           sf org login sfdx-url \
             --sfdx-url-file auth.txt \
             --alias qa \
@@ -45,46 +44,69 @@ jobs:
         run: |
           git fetch origin ${{ github.base_ref }}
 
-          FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep '\.cls$' || true)
+          FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD \
+            | grep '\.cls$' \
+            | tr '\n' ',' \
+            | sed 's/,$//')
 
-          echo "files<<EOF" >> $GITHUB_OUTPUT
-          echo "$FILES" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          echo "files=$FILES" >> $GITHUB_OUTPUT
+          echo "Changed files: $FILES"
 
       - name: Run Salesforce Code Analyzer
         if: steps.changed-files.outputs.files != ''
         continue-on-error: true
         run: |
           echo "Running scanner on changed Apex files..."
-
           sf scanner run \
             --target "${{ steps.changed-files.outputs.files }}" \
             --severity-threshold 3 \
             --format table
-
-      - name: Check SGD Plugin
-        run: |
-          sf plugins
 
       - name: Generate Delta Package
         run: |
           mkdir -p delta
 
           sf sgd source delta \
-            --from "origin/${{ github.base_ref }}" \
-            --to "HEAD" \
-            --output-dir "delta"
+            --from origin/${{ github.base_ref }} \
+            --to HEAD \
+            --output-dir delta
 
-      - name: Verify Delta Package
-        run: |
           ls -R delta
+
+      - name: Find Test Classes
+        id: tests
+        run: |
+          git fetch origin ${{ github.base_ref }}
+
+          TEST_CLASSES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD \
+            | grep 'Test\.cls$' \
+            | sed 's#.*/##' \
+            | sed 's/\.cls$//' \
+            | paste -sd "," -)
+
+          echo "classes=$TEST_CLASSES" >> $GITHUB_OUTPUT
+
+          echo "Detected Test Classes:"
+          echo "$TEST_CLASSES"
 
       - name: Validate Deployment
         run: |
-          sf project deploy validate \
-            --manifest delta/package/package.xml \
-            --target-org qa \
-            --test-level RunLocalTests
+          if [ -n "${{ steps.tests.outputs.classes }}" ]; then
+            echo "Running specified tests"
+
+            sf project deploy validate \
+              --manifest delta/package/package.xml \
+              --target-org qa \
+              --test-level RunSpecifiedTests \
+              --tests "${{ steps.tests.outputs.classes }}"
+          else
+            echo "No test classes changed. Running local tests."
+
+            sf project deploy validate \
+              --manifest delta/package/package.xml \
+              --target-org qa \
+              --test-level RunLocalTests
+          fi
 
       - name: Validation Success Comment
         if: success()
@@ -95,7 +117,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: "✅ PR Validation Passed"
+              body: '✅ PR Validation Passed'
             });
 
       - name: Validation Failure Comment
@@ -107,5 +129,5 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: "❌ PR Validation Failed. Check GitHub Actions logs."
+              body: '❌ PR Validation Failed. Check GitHub Actions logs.'
             });
