@@ -22,7 +22,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Generate Diff
+      - name: Generate PR Diff
         run: |
           git fetch origin "${{ github.base_ref }}"
           git diff origin/${{ github.base_ref }}...HEAD > pr.diff
@@ -31,76 +31,32 @@ jobs:
           wc -c pr.diff
 
       - name: Review with Gemini
-        id: gemini
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-
           DIFF=$(head -c 25000 pr.diff)
 
-          PAYLOAD=$(jq -n \
-            --arg diff "$DIFF" \
+          PROMPT="You are a Senior Salesforce Architect. Review this Salesforce PR and identify Apex issues, security issues, bulkification issues, SOQL/DML in loops, governor limit risks, LWC issues, Flow issues and best practice violations. PR Diff: $DIFF"
+
+          jq -n \
+            --arg prompt "$PROMPT" \
             '{
               contents: [
                 {
                   parts: [
                     {
-                      text:
-                      ("You are a Senior Salesforce Architect.
-
-Review this PR for:
-
-1. Apex best practices
-2. Bulkification issues
-3. SOQL/DML inside loops
-4. CRUD/FLS violations
-5. Sharing/security issues
-6. Governor limit risks
-7. LWC best practices
-8. Flow best practices
-9. Performance concerns
-
-Provide:
-- Severity
-- Finding
-- Recommendation
-
-PR Diff:
-
-" + $diff)
+                      text: $prompt
                     }
                   ]
                 }
               ]
-            }')
+            }' > payload.json
 
-          ATTEMPT=1
-          MAX_ATTEMPTS=5
-
-          while [ $ATTEMPT -le $MAX_ATTEMPTS ]
-          do
-
-            echo "Gemini attempt $ATTEMPT"
-
-            RESPONSE=$(curl -s \
-              -X POST \
-              "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}" \
-              -H "Content-Type: application/json" \
-              -d "$PAYLOAD")
-
-            echo "$RESPONSE" > review.json
-
-            if jq -e '.candidates' review.json > /dev/null; then
-              echo "Gemini response received"
-              break
-            fi
-
-            echo "Retrying in 15 seconds..."
-            sleep 15
-
-            ATTEMPT=$((ATTEMPT+1))
-
-          done
+          curl -s \
+            -X POST \
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d @payload.json > review.json
 
           echo "===== GEMINI RESPONSE ====="
           cat review.json
@@ -108,7 +64,6 @@ PR Diff:
       - name: Extract Review
         id: extract
         run: |
-
           REVIEW=$(jq -r '
             if .candidates then
               .candidates[0].content.parts[0].text
@@ -135,7 +90,5 @@ PR Diff:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `## 🤖 AI Code Review
-
-${process.env.REVIEW_TEXT}`
-            });
+              body: "## 🤖 AI Code Review\n\n" + process.env.REVIEW_TEXT
+            })
