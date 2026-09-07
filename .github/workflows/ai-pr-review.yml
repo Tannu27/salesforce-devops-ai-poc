@@ -2,15 +2,11 @@ name: AI PR Review
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize]
 
 jobs:
-  ai-review:
+  review:
     runs-on: ubuntu-latest
-
-    permissions:
-      pull-requests: write
-      contents: read
 
     steps:
       - name: Checkout Source
@@ -18,56 +14,53 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get PR Diff
+      - name: Get Changed Files
+        run: |
+          git diff --name-only \
+          origin/${{ github.base_ref }}...HEAD > changed_files.txt
+
+      - name: Create Diff
         run: |
           git diff \
-            ${{ github.event.pull_request.base.sha }} \
-            ${{ github.event.pull_request.head.sha }} > pr.diff
-
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
+          origin/${{ github.base_ref }}...HEAD > pr.diff
 
       - name: Review with OpenAI
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          DIFF=$(head -c 15000 pr.diff | sed 's/"/\\"/g')
 
-          RESPONSE=$(curl https://api.openai.com/v1/chat/completions \
-            -s \
-            -H "Authorization: Bearer $OPENAI_API_KEY" \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"model\":\"gpt-4.1-mini\",
-              \"messages\":[
-                {
-                  \"role\":\"system\",
-                  \"content\":\"You are a senior Salesforce architect. Review Apex, LWC, Flow, Validation Rules, Triggers and metadata changes. Identify bugs, security issues, bulkification issues, governor limit risks, missing test coverage and Salesforce best-practice violations. Return concise review comments in markdown.\"
-                },
-                {
-                  \"role\":\"user\",
-                  \"content\":\"Review this Salesforce PR diff:\n$DIFF\"
-                }
-              ],
-              \"temperature\":0.2
-            }")
+          REVIEW=$(curl -s https://api.openai.com/v1/chat/completions \
+          -H "Authorization: Bearer $OPENAI_API_KEY" \
+          -H "Content-Type: application/json" \
+          -d @- <<EOF
+          {
+            "model":"gpt-4.1-mini",
+            "messages":[
+              {
+                "role":"system",
+                "content":"You are a Salesforce Architect. Review Apex, LWC, Flow, SOQL, security, bulkification and best practices."
+              },
+              {
+                "role":"user",
+                "content":"$(cat pr.diff)"
+              }
+            ]
+          }
+          EOF)
 
-          echo "$RESPONSE" | jq -r '.choices[0].message.content' > review.txt
+          echo "$REVIEW" > review.json
 
-          echo "Generated Review:"
-          cat review.txt
-
-      - name: Comment on PR
+      - name: Post PR Comment
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
-            const review = fs.readFileSync('review.txt', 'utf8');
+            const review = fs.readFileSync('review.json','utf8');
 
-            await github.rest.issues.createComment({
+            github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `## 🤖 AI Salesforce Review\n\n${review}`
+              body: `## 🤖 AI Review\n\n${review}`
             });
