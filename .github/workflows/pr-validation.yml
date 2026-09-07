@@ -37,38 +37,79 @@ jobs:
 
           sf sgd source delta \
             --to HEAD \
-            --from origin/develop \
+            --from HEAD~1 \
             --output-dir delta
 
       - name: Show Delta Package
         run: |
           cat delta/package/package.xml || true
 
-      - name: Scan Changed Apex Classes
+      - name: Run Code Analyzer
         run: |
-          FILES=$(find delta -name "*.cls" | tr '\n' ',' | sed 's/,$//')
+          FILES=$(find force-app/main/default/classes -name "*.cls" | tr '\n' ',' | sed 's/,$//')
 
           if [ -n "$FILES" ]; then
-            echo "Scanning Apex Classes:"
-            echo "$FILES"
-
             sf scanner run \
               --target "$FILES" \
               --severity-threshold 2 \
               --format table
           else
-            echo "No Apex classes changed. Skipping scan."
+            echo "No Apex classes found."
           fi
+
+      - name: Detect Test Classes
+        id: tests
+        run: |
+          TEST_CLASSES=""
+
+          CHANGED_CLASSES=$(git diff --name-only HEAD~1 HEAD | grep "\.cls$" || true)
+
+          echo "Changed Classes:"
+          echo "$CHANGED_CLASSES"
+
+          for FILE in $CHANGED_CLASSES
+          do
+            CLASS=$(basename "$FILE" .cls)
+
+            if [[ "$CLASS" != *Test ]]; then
+
+              TEST_CLASS="${CLASS/Helper/Test}"
+
+              if grep -Rq "class $TEST_CLASS" force-app/main/default/classes; then
+                TEST_CLASSES="${TEST_CLASSES}${TEST_CLASS},"
+              fi
+
+            fi
+          done
+
+          TEST_CLASSES=$(echo "$TEST_CLASSES" | sed 's/,$//')
+
+          echo "Detected Tests: $TEST_CLASSES"
+
+          echo "TEST_CLASSES=$TEST_CLASSES" >> $GITHUB_ENV
 
       - name: Validate Deployment
         run: |
           if [ -f "delta/package/package.xml" ] && grep -q "<types>" delta/package/package.xml; then
 
-            sf project deploy validate \
-              --manifest delta/package/package.xml \
-              --target-org qa \
-              --test-level RunRelevantTests
+            if [ -n "$TEST_CLASSES" ]; then
+
+              echo "Running Tests: $TEST_CLASSES"
+
+              sf project deploy validate \
+                --manifest delta/package/package.xml \
+                --target-org qa \
+                --test-level RunSpecifiedTests \
+                --tests "$TEST_CLASSES"
+
+            else
+
+              echo "No mapped test classes found."
+              exit 1
+
+            fi
 
           else
+
             echo "No Salesforce metadata changes found."
           fi
