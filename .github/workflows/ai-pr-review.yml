@@ -22,7 +22,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Generate PR Diff
+      - name: Generate Diff
         run: |
           git fetch origin "${{ github.base_ref }}"
           git diff origin/${{ github.base_ref }}...HEAD > pr.diff
@@ -31,48 +31,85 @@ jobs:
           wc -c pr.diff
 
       - name: Review with Gemini
+        id: gemini
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
+
           DIFF=$(head -c 25000 pr.diff)
 
-          jq -n \
+          PAYLOAD=$(jq -n \
             --arg diff "$DIFF" \
             '{
-              contents: [{
-                parts: [{
-                  text:
-                  ("You are a Senior Salesforce Architect.\n\n" +
-                   "Review this Salesforce Pull Request and identify:\n" +
-                   "- Apex best practices issues\n" +
-                   "- Bulkification issues\n" +
-                   "- SOQL/DML in loops\n" +
-                   "- Governor limit risks\n" +
-                   "- Security vulnerabilities\n" +
-                   "- LWC best practices\n" +
-                   "- Flow best practices\n" +
-                   "- Performance concerns\n\n" +
-                   "For each issue provide:\n" +
-                   "Severity\nIssue\nRecommendation\n\n" +
-                   "PR Diff:\n\n" +
-                   $diff)
-                }]
-              }]
-            }' > request.json
+              contents: [
+                {
+                  parts: [
+                    {
+                      text:
+                      ("You are a Senior Salesforce Architect.
 
-          curl -s \
-            -X POST \
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${GEMINI_API_KEY}" \
-            -H "Content-Type: application/json" \
-            -d @request.json \
-            > review.json
+Review this PR for:
+
+1. Apex best practices
+2. Bulkification issues
+3. SOQL/DML inside loops
+4. CRUD/FLS violations
+5. Sharing/security issues
+6. Governor limit risks
+7. LWC best practices
+8. Flow best practices
+9. Performance concerns
+
+Provide:
+- Severity
+- Finding
+- Recommendation
+
+PR Diff:
+
+" + $diff)
+                    }
+                  ]
+                }
+              ]
+            }')
+
+          ATTEMPT=1
+          MAX_ATTEMPTS=5
+
+          while [ $ATTEMPT -le $MAX_ATTEMPTS ]
+          do
+
+            echo "Gemini attempt $ATTEMPT"
+
+            RESPONSE=$(curl -s \
+              -X POST \
+              "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}" \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD")
+
+            echo "$RESPONSE" > review.json
+
+            if jq -e '.candidates' review.json > /dev/null; then
+              echo "Gemini response received"
+              break
+            fi
+
+            echo "Retrying in 15 seconds..."
+            sleep 15
+
+            ATTEMPT=$((ATTEMPT+1))
+
+          done
 
           echo "===== GEMINI RESPONSE ====="
           cat review.json
 
       - name: Extract Review
+        id: extract
         run: |
-          jq -r '
+
+          REVIEW=$(jq -r '
             if .candidates then
               .candidates[0].content.parts[0].text
             elif .error then
@@ -80,22 +117,25 @@ jobs:
             else
               "No review generated."
             end
-          ' review.json > review.txt
+          ' review.json)
 
-          echo "===== REVIEW ====="
-          cat review.txt
+          {
+            echo "review<<EOF"
+            echo "$REVIEW"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Comment on PR
         uses: actions/github-script@v7
+        env:
+          REVIEW_TEXT: ${{ steps.extract.outputs.review }}
         with:
           script: |
-            const fs = require('fs');
-
-            const review = fs.readFileSync('review.txt', 'utf8');
-
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: context.payload.pull_request.number,
-              body: "## AI Code Review\n\n" + review
+              issue_number: context.issue.number,
+              body: `## 🤖 AI Code Review
+
+${process.env.REVIEW_TEXT}`
             });
