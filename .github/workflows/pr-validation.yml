@@ -9,6 +9,10 @@ jobs:
   validate:
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: read
+      pull-requests: read
+
     steps:
       - name: Checkout Source
         uses: actions/checkout@v4
@@ -18,43 +22,27 @@ jobs:
       - name: Install Salesforce CLI
         run: npm install -g @salesforce/cli
 
-      - name: Install SGD
-        run: echo y | sf plugins install sfdx-git-delta
+      - name: Install Salesforce Code Analyzer
+        run: sf plugins install @salesforce/sfdx-scanner
 
       - name: Authenticate QA Sandbox
         run: |
           echo "${{ secrets.SFDX_AUTH_URL_QA }}" > auth.txt
-          sf org login sfdx-url --sfdx-url-file auth.txt --alias qa
+          sf org login sfdx-url \
+            --sfdx-url-file auth.txt \
+            --alias qa
 
-      - name: Generate Delta
+      - name: Run Salesforce Code Analyzer
         run: |
-          mkdir delta
-          sf sgd source delta \
-            --to HEAD \
-            --from origin/develop \
-            --output-dir delta
-
-      - name: Determine Tests to Run
-        run: |
-          TESTS=""
-
-          if grep -q "LeaveTriggerHelper" delta/package/package.xml; then
-            TESTS="${TESTS}LeaveTriggerTest,"
-          fi
-
-          TESTS=$(echo $TESTS | sed 's/,$//')
-
-          echo "TESTS=$TESTS" >> $GITHUB_ENV
-          echo "Tests to run: $TESTS"
+          echo "Running Salesforce Code Analyzer..."
+          
+          sf scanner run \
+            --target force-app \
+            --format table
 
       - name: Validate Deployment
         run: |
-          if [ -n "$TESTS" ]; then
-            sf project deploy validate \
-              --manifest delta/package/package.xml \
-              --target-org qa \
-              --test-level RunSpecifiedTests \
-              --tests "$TESTS"
-          else
-            echo "No Apex tests required."
-          fi
+          sf project deploy validate \
+            --source-dir force-app \
+            --target-org qa \
+            --test-level RunRelevantTests
