@@ -9,10 +9,6 @@ jobs:
   validate:
     runs-on: ubuntu-latest
 
-    permissions:
-      contents: read
-      pull-requests: read
-
     steps:
       - name: Checkout Source
         uses: actions/checkout@v4
@@ -22,8 +18,11 @@ jobs:
       - name: Install Salesforce CLI
         run: npm install -g @salesforce/cli
 
+      - name: Install SGD
+        run: echo y | sf plugins install sfdx-git-delta
+
       - name: Install Salesforce Code Analyzer
-        run: sf plugins install @salesforce/sfdx-scanner
+        run: echo y | sf plugins install @salesforce/sfdx-scanner
 
       - name: Authenticate QA Sandbox
         run: |
@@ -32,17 +31,44 @@ jobs:
             --sfdx-url-file auth.txt \
             --alias qa
 
-      - name: Run Salesforce Code Analyzer
+      - name: Generate Delta
         run: |
-          echo "Running Salesforce Code Analyzer..."
-          
-          sf scanner run \
-            --target force-app \
-            --format table
+          mkdir delta
+
+          sf sgd source delta \
+            --to HEAD \
+            --from origin/develop \
+            --output-dir delta
+
+      - name: Show Delta Package
+        run: |
+          cat delta/package/package.xml || true
+
+      - name: Scan Changed Apex Classes
+        run: |
+          FILES=$(find delta -name "*.cls" | tr '\n' ',' | sed 's/,$//')
+
+          if [ -n "$FILES" ]; then
+            echo "Scanning Apex Classes:"
+            echo "$FILES"
+
+            sf scanner run \
+              --target "$FILES" \
+              --severity-threshold 2 \
+              --format table
+          else
+            echo "No Apex classes changed. Skipping scan."
+          fi
 
       - name: Validate Deployment
         run: |
-          sf project deploy validate \
-            --source-dir force-app \
-            --target-org qa \
-            --test-level RunRelevantTests
+          if [ -f "delta/package/package.xml" ] && grep -q "<types>" delta/package/package.xml; then
+
+            sf project deploy validate \
+              --manifest delta/package/package.xml \
+              --target-org qa \
+              --test-level RunRelevantTests
+
+          else
+            echo "No Salesforce metadata changes found."
+          fi
