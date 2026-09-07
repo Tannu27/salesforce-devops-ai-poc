@@ -41,22 +41,21 @@ jobs:
             '{
               contents: [{
                 parts: [{
-                  text: (
-                    "You are a Senior Salesforce Architect.\n\n" +
-                    "Review this Salesforce Pull Request.\n\n" +
-                    "Check:\n" +
-                    "- Apex best practices\n" +
-                    "- Bulkification\n" +
-                    "- SOQL/DML in loops\n" +
-                    "- Security issues\n" +
-                    "- Governor limits\n" +
-                    "- LWC best practices\n" +
-                    "- Flow best practices\n" +
-                    "- Performance issues\n\n" +
-                    "Provide Severity (High/Medium/Low).\n\n" +
-                    "PR Diff:\n\n" +
-                    $diff
-                  )
+                  text:
+                  ("You are a Senior Salesforce Architect.\n\n" +
+                   "Review this Salesforce Pull Request and identify:\n" +
+                   "- Apex best practices issues\n" +
+                   "- Bulkification issues\n" +
+                   "- SOQL/DML in loops\n" +
+                   "- Governor limit risks\n" +
+                   "- Security vulnerabilities\n" +
+                   "- LWC best practices\n" +
+                   "- Flow best practices\n" +
+                   "- Performance concerns\n\n" +
+                   "For each issue provide:\n" +
+                   "Severity\nIssue\nRecommendation\n\n" +
+                   "PR Diff:\n\n" +
+                   $diff)
                 }]
               }]
             }' > request.json
@@ -68,6 +67,7 @@ jobs:
             -d @request.json \
             > review.json
 
+          echo "===== GEMINI RESPONSE ====="
           cat review.json
 
       - name: Extract Review
@@ -97,7 +97,5 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.payload.pull_request.number,
-              body: `## 🤖 AI Code Review
-
-${review}`
+              body: "## AI Code Review\n\n" + review
             });
