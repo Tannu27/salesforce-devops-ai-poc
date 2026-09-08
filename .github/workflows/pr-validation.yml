@@ -1,12 +1,21 @@
-name: PR Validation
+name: Salesforce PR Validation
 
 on:
   pull_request:
     branches:
       - develop
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
 
 jobs:
-  validate:
+  validate-pr:
     runs-on: ubuntu-latest
 
     steps:
@@ -18,43 +27,133 @@ jobs:
       - name: Install Salesforce CLI
         run: npm install -g @salesforce/cli
 
-      - name: Install SGD
-        run: echo y | sf plugins install sfdx-git-delta
+      - name: Install SFDX Git Delta
+        run: |
+          echo y | sf plugins install sfdx-git-delta
 
-      - name: Authenticate QA Sandbox
+      - name: Install Salesforce Code Analyzer
+        run: |
+          echo y | sf plugins install @salesforce/sfdx-scanner
+
+      - name: Authenticate QA Org
         run: |
           echo "${{ secrets.SFDX_AUTH_URL_QA }}" > auth.txt
-          sf org login sfdx-url --sfdx-url-file auth.txt --alias qa
+          sf org login sfdx-url \
+            --sfdx-url-file auth.txt \
+            --alias qa \
+            --set-default
 
-      - name: Generate Delta
+      - name: Run Code Analyzer
+        continue-on-error: true
         run: |
-          mkdir delta
+          if [ -f force-app/main/default/classes/LeaveTriggerHelper.cls ]; then
+            sf scanner run \
+              --target force-app/main/default/classes/LeaveTriggerHelper.cls \
+              --severity-threshold 3 \
+              --format table
+          fi
+
+      - name: Generate Delta Package
+        run: |
+          mkdir -p delta
+
           sf sgd source delta \
+            --from origin/${{ github.base_ref }} \
             --to HEAD \
-            --from origin/develop \
             --output-dir delta
 
-      - name: Determine Tests to Run
+          echo "Generated Delta:"
+          ls -R delta
+
+      - name: Check For Metadata Changes
+        id: delta_check
         run: |
-          TESTS=""
-
-          if grep -q "LeaveTriggerHelper" delta/package/package.xml; then
-            TESTS="${TESTS}LeaveTriggerTest,"
+          if grep -q "<types>" delta/package/package.xml; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "Salesforce metadata changes found."
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "No Salesforce metadata changes found."
           fi
-
-          TESTS=$(echo $TESTS | sed 's/,$//')
-
-          echo "TESTS=$TESTS" >> $GITHUB_ENV
-          echo "Tests to run: $TESTS"
 
       - name: Validate Deployment
+        if: steps.delta_check.outputs.has_changes == 'true'
         run: |
-          if [ -n "$TESTS" ]; then
-            sf project deploy validate \
-              --manifest delta/package/package.xml \
-              --target-org qa \
-              --test-level RunSpecifiedTests \
-              --tests "$TESTS"
-          else
-            echo "No Apex tests required."
-          fi
+          sf project deploy validate \
+            --manifest delta/package/package.xml \
+            --target-org qa \
+            --test-level RunSpecifiedTests \
+            --tests LeaveTriggerTest
+
+      - name: Skip Validation
+        if: steps.delta_check.outputs.has_changes == 'false'
+        run: |
+          echo "Skipping deployment validation because no Salesforce metadata changed."
+
+      - name: Validation Success Comment
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body =
+              "## 🚀 PR Validation Result\n\n✅ PR Validation Passed";
+
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+
+            const existing = comments.data.find(
+              c => c.body.includes("## 🚀 PR Validation Result")
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
+
+      - name: Validation Failure Comment
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body =
+              "## 🚀 PR Validation Result\n\n❌ PR Validation Failed. Check GitHub Actions logs.";
+
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+
+            const existing = comments.data.find(
+              c => c.body.includes("## 🚀 PR Validation Result")
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
