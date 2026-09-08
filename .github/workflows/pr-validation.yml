@@ -4,6 +4,10 @@ on:
   pull_request:
     branches:
       - develop
+    types:
+      - opened
+      - synchronize
+      - reopened
 
 permissions:
   contents: read
@@ -42,10 +46,12 @@ jobs:
       - name: Run Code Analyzer
         continue-on-error: true
         run: |
-          sf scanner run \
-            --target force-app/main/default/classes/LeaveTriggerHelper.cls \
-            --severity-threshold 3 \
-            --format table
+          if [ -f force-app/main/default/classes/LeaveTriggerHelper.cls ]; then
+            sf scanner run \
+              --target force-app/main/default/classes/LeaveTriggerHelper.cls \
+              --severity-threshold 3 \
+              --format table
+          fi
 
       - name: Generate Delta Package
         run: |
@@ -59,7 +65,19 @@ jobs:
           echo "Generated Delta:"
           ls -R delta
 
+      - name: Check For Metadata Changes
+        id: delta_check
+        run: |
+          if grep -q "<types>" delta/package/package.xml; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "Salesforce metadata changes found."
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "No Salesforce metadata changes found."
+          fi
+
       - name: Validate Deployment
+        if: steps.delta_check.outputs.has_changes == 'true'
         run: |
           sf project deploy validate \
             --manifest delta/package/package.xml \
@@ -67,26 +85,75 @@ jobs:
             --test-level RunSpecifiedTests \
             --tests LeaveTriggerTest
 
+      - name: Skip Validation
+        if: steps.delta_check.outputs.has_changes == 'false'
+        run: |
+          echo "Skipping deployment validation because no Salesforce metadata changed."
+
       - name: Validation Success Comment
         if: success()
         uses: actions/github-script@v7
         with:
           script: |
-            await github.rest.issues.createComment({
+            const body =
+              "## 🚀 PR Validation Result\n\n✅ PR Validation Passed";
+
+            const comments = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: '✅ PR Validation Passed'
+              issue_number: context.issue.number
             });
+
+            const existing = comments.data.find(
+              c => c.body.includes("## 🚀 PR Validation Result")
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
 
       - name: Validation Failure Comment
         if: failure()
         uses: actions/github-script@v7
         with:
           script: |
-            await github.rest.issues.createComment({
+            const body =
+              "## 🚀 PR Validation Result\n\n❌ PR Validation Failed. Check GitHub Actions logs.";
+
+            const comments = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: '❌ PR Validation Failed. Check GitHub Actions logs.'
+              issue_number: context.issue.number
             });
+
+            const existing = comments.data.find(
+              c => c.body.includes("## 🚀 PR Validation Result")
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
