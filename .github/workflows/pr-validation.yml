@@ -4,6 +4,10 @@ on:
   pull_request:
     branches:
       - develop
+    types:
+      - opened
+      - synchronize
+      - reopened
 
 permissions:
   contents: read
@@ -34,6 +38,7 @@ jobs:
       - name: Authenticate QA Org
         run: |
           echo "${{ secrets.SFDX_AUTH_URL_QA }}" > auth.txt
+
           sf org login sfdx-url \
             --sfdx-url-file auth.txt \
             --alias qa \
@@ -72,21 +77,66 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: '✅ PR Validation Passed'
-            });
+            const body = "## 🚀 PR Validation Result\n\n✅ PR Validation Passed";
+
+            const comments =
+              await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number
+              });
+
+            const existing = comments.data.find(
+              c => c.body.includes("## 🚀 PR Validation Result")
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
 
       - name: Validation Failure Comment
         if: failure()
         uses: actions/github-script@v7
         with:
           script: |
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: '❌ PR Validation Failed. Check GitHub Actions logs.'
-            });
+            const body =
+            "## 🚀 PR Validation Result\n\n❌ PR Validation Failed. Check GitHub Actions logs.";
+
+            const comments =
+              await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number
+              });
+
+            const existing = comments.data.find(
+              c => c.body.includes("## 🚀 PR Validation Result")
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
