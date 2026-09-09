@@ -11,7 +11,6 @@ public static DataWrapper getEmployeeDetail(String dataType, Boolean isSingle) {
         returnValue.tableColumns = null;
         System.debug('Return value ' +returnValue.columns);
         System.debug('Return oinijhe ' +returnValue.isSingle);
-        System.debug('Return msdjsabj ' +returnValue.records);
     } 
     return returnValue; 
 }
