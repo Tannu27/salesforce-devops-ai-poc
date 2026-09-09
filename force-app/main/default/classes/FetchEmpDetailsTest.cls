@@ -5,6 +5,9 @@ public class FetchEmpDetailsTest {
         empRecord.First_Name__c = 'Test Emplyee';
         empRecord.Email__c = 'test@test.com';
         empRecord.Connected_User__c = UserInfo.getUserId();
+        empRecord.orgChartId__c = 31;
+        empRecord.Emergency_Contact_Relation__c = 'Father';
+        empRecord.Emergency_Contact_Number__c = '9999999999';
         insert empRecord;        
         
         Compensation__c compRecord = new Compensation__c();
