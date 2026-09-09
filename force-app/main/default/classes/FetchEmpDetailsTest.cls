@@ -46,7 +46,7 @@ public class FetchEmpDetailsTest {
         test.stopTest();
     }
 
-@isTest
+	@isTest
     static void validateGetCompensationDetail() {
         Compensation__c compRec = [SELECT id, Basic_Salary__c, Employee__c FROM Compensation__c ];
         //System.AssertEquals(compRec.Employee__c, );
@@ -56,15 +56,5 @@ public class FetchEmpDetailsTest {
          FetchEmpDetails.getCompensationDetail('Leave', false);
          FetchEmpDetails.getCompensationDetail('Holiday', false);
         test.stopTest();
-        
-         /*Holiday holidayRecord = [SELECT id, Name, Description FROM Holiday ];
-        //System.AssertEquals(compRec.Employee__c, );
-        test.startTest();
-         FetchEmpDetails.getCompensationDetail('Holiday', false);*/
-        
-        //test.stopTest();
-         
-        //System.AssertEquals(compRec.Employee__c, );
-       
     }    
 }
