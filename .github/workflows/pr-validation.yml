@@ -80,7 +80,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y jq
 
-          TESTS=""
+          TEST_ARGS=""
           APEX_CHANGED=false
 
           CHANGED_CLASSES=$(git diff --name-only origin/${{ github.base_ref }} HEAD \
@@ -99,48 +99,50 @@ jobs:
 
             CLASS_NAME=$(basename "$FILE" .cls)
 
-            echo "Processing $CLASS_NAME"
+            echo "Processing: $CLASS_NAME"
 
-            CONVENTION_TEST="${CLASS_NAME}Test"
+            TEST_CLASS=""
 
-            if [ -f "force-app/main/default/classes/${CONVENTION_TEST}.cls" ]; then
+            if [ -f "force-app/main/default/classes/${CLASS_NAME}Test.cls" ]; then
 
-              echo "Found convention test: $CONVENTION_TEST"
-
-              if [[ ",$TESTS," != *",$CONVENTION_TEST,"* ]]; then
-                TESTS="${TESTS},${CONVENTION_TEST}"
-              fi
+              TEST_CLASS="${CLASS_NAME}Test"
+              echo "Convention test found: $TEST_CLASS"
 
             elif [ -f ".github/test-mapping.json" ]; then
 
-              MAPPED=$(jq -r --arg cls "$CLASS_NAME" '.[$cls]' .github/test-mapping.json)
+              TEST_CLASS=$(jq -r --arg cls "$CLASS_NAME" '.[$cls]' .github/test-mapping.json)
 
-              if [ "$MAPPED" != "null" ]; then
+              if [ "$TEST_CLASS" = "null" ]; then
+                TEST_CLASS=""
+              fi
 
-                echo "Found mapped test: $MAPPED"
+              if [ ! -z "$TEST_CLASS" ]; then
+                echo "Mapped test found: $TEST_CLASS"
+              fi
 
-                if [[ ",$TESTS," != *",$MAPPED,"* ]]; then
-                  TESTS="${TESTS},${MAPPED}"
-                fi
+            fi
 
+            if [ ! -z "$TEST_CLASS" ]; then
+
+              if [[ "$TEST_ARGS" != *"--tests $TEST_CLASS"* ]]; then
+                TEST_ARGS="$TEST_ARGS --tests $TEST_CLASS"
               fi
 
             fi
 
           done
 
-          TESTS=$(echo "$TESTS" | sed 's/^,//')
+          echo "Final Test Args:"
+          echo "$TEST_ARGS"
 
-          echo "Detected tests: $TESTS"
-
-          if [ ! -z "$TESTS" ]; then
+          if [ ! -z "$TEST_ARGS" ]; then
 
             echo "validation_mode=specified" >> $GITHUB_OUTPUT
-            echo "tests=$TESTS" >> $GITHUB_OUTPUT
+            echo "test_args=$TEST_ARGS" >> $GITHUB_OUTPUT
 
           elif [ "$APEX_CHANGED" = "true" ]; then
 
-            echo "validation_mode=local" >> $GITHUB_OUTPUT
+            echo "validation_mode=missing_tests" >> $GITHUB_OUTPUT
 
           else
 
@@ -148,36 +150,32 @@ jobs:
 
           fi
 
+      - name: Fail When Apex Has No Test Mapping
+        if: steps.test_selection.outputs.validation_mode == 'missing_tests'
+        run: |
+          echo "Apex class changed but no test class could be determined."
+          echo "Create <ClassName>Test.cls or add mapping in .github/test-mapping.json"
+          exit 1
+
       - name: Validate Deployment - Specified Tests
         if: steps.delta_check.outputs.has_changes == 'true' && steps.test_selection.outputs.validation_mode == 'specified'
         run: |
 
-          echo "Running:"
-          echo "${{ steps.test_selection.outputs.tests }}"
+          echo "Running tests:"
+          echo "${{ steps.test_selection.outputs.test_args }}"
 
           sf project deploy validate \
             --manifest delta/package/package.xml \
             --target-org qa \
             --test-level RunSpecifiedTests \
-            --tests "${{ steps.test_selection.outputs.tests }}"
-
-      - name: Validate Deployment - Run Local Tests
-        if: steps.delta_check.outputs.has_changes == 'true' && steps.test_selection.outputs.validation_mode == 'local'
-        run: |
-
-          echo "No matching test class found."
-          echo "Running RunLocalTests."
-
-          sf project deploy validate \
-            --manifest delta/package/package.xml \
-            --target-org qa \
-            --test-level RunLocalTests
+            ${{ steps.test_selection.outputs.test_args }}
 
       - name: Validate Deployment - No Test Run
         if: steps.delta_check.outputs.has_changes == 'true' && steps.test_selection.outputs.validation_mode == 'notest'
         run: |
 
           echo "No Apex classes changed."
+          echo "Running NoTestRun."
 
           sf project deploy validate \
             --manifest delta/package/package.xml \
