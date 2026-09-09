@@ -28,8 +28,15 @@ jobs:
         run: |
           git fetch origin ${{ github.base_ref }}:${{ github.base_ref }}
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Install Salesforce CLI
-        uses: salesforcecli/github-action@v2
+        run: |
+          npm install -g @salesforce/cli
+          sf --version
 
       - name: Install SFDX Git Delta
         run: |
