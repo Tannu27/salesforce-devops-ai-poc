@@ -24,8 +24,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Fetch Base Branch
+        run: |
+          git fetch origin ${{ github.base_ref }}:${{ github.base_ref }}
+
       - name: Install Salesforce CLI
-        run: npm install -g @salesforce/cli
+        uses: salesforcecli/github-action@v2
 
       - name: Install SFDX Git Delta
         run: |
@@ -67,6 +71,11 @@ jobs:
       - name: Check For Metadata Changes
         id: delta_check
         run: |
+          if [ ! -f delta/package/package.xml ]; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
           if grep -q "<types>" delta/package/package.xml; then
             echo "has_changes=true" >> $GITHUB_OUTPUT
           else
@@ -89,6 +98,10 @@ jobs:
 
           echo "Changed Apex Classes:"
           echo "$CHANGED_CLASSES"
+
+          echo "changed_classes<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGED_CLASSES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
           if [ ! -z "$CHANGED_CLASSES" ]; then
             APEX_CHANGED=true
@@ -138,6 +151,7 @@ jobs:
           if [ ! -z "$TEST_ARGS" ]; then
 
             echo "validation_mode=specified" >> $GITHUB_OUTPUT
+            TEST_ARGS=$(echo "$TEST_ARGS" | xargs)
             echo "test_args=$TEST_ARGS" >> $GITHUB_OUTPUT
 
           elif [ "$APEX_CHANGED" = "true" ]; then
@@ -159,16 +173,48 @@ jobs:
 
       - name: Validate Deployment - Specified Tests
         if: steps.delta_check.outputs.has_changes == 'true' && steps.test_selection.outputs.validation_mode == 'specified'
+        id: deploy_validation
         run: |
 
           echo "Running tests:"
           echo "${{ steps.test_selection.outputs.test_args }}"
 
+          set +e
+
           sf project deploy validate \
             --manifest delta/package/package.xml \
             --target-org qa \
             --test-level RunSpecifiedTests \
-            ${{ steps.test_selection.outputs.test_args }}
+            ${{ steps.test_selection.outputs.test_args }} \
+            --json > validation-result.json
+
+          EXIT_CODE=$?
+
+          set -e
+
+          if [ -f validation-result.json ]; then
+
+            cat validation-result.json
+
+            TOTAL=$(jq -r '.result.details.runTestResult.numTestsRun // 0' validation-result.json)
+
+            FAILED=$(jq -r '.result.details.runTestResult.numFailures // 0' validation-result.json)
+
+          else
+
+            TOTAL=0
+            FAILED=0
+
+          fi
+
+          PASSED=$((TOTAL-FAILED))
+
+          echo "passed=$PASSED" >> $GITHUB_OUTPUT
+          echo "failed=$FAILED" >> $GITHUB_OUTPUT
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            exit $EXIT_CODE
+          fi
 
       - name: Validate Deployment - No Test Run
         if: steps.delta_check.outputs.has_changes == 'true' && steps.test_selection.outputs.validation_mode == 'notest'
@@ -190,10 +236,42 @@ jobs:
       - name: Validation Success Comment
         if: success()
         uses: actions/github-script@v7
+        env:
+          CHANGED_CLASSES: ${{ steps.test_selection.outputs.changed_classes }}
+          TEST_ARGS: ${{ steps.test_selection.outputs.test_args }}
+          PASSED: ${{ steps.deploy_validation.outputs.passed }}
+          FAILED: ${{ steps.deploy_validation.outputs.failed }}
         with:
           script: |
-            const body =
-              "## PR Validation Result\n\n✅ PR Validation Passed";
+
+            const changedClasses = (process.env.CHANGED_CLASSES || '')
+              .trim()
+              .split('\n')
+              .filter(Boolean)
+              .map(c => `- ${c.split('/').pop().replace('.cls','')}`)
+              .join('\n');
+
+            const testsExecuted = (process.env.TEST_ARGS || '')
+              .trim()
+              .split('--tests')
+              .map(t => t.trim())
+              .filter(Boolean)
+              .map(t => `- ${t}`)
+              .join('\n');
+
+            const body = `## PR Validation Result
+
+            ✅ Validation Passed
+
+            ### Changed Classes
+            ${changedClasses || 'None'}
+
+            ### Tests Executed
+            ${testsExecuted || 'No Tests'}
+
+            ### Results
+            - Tests Passed: ${process.env.PASSED || '0'}
+            - Tests Failed: ${process.env.FAILED || '0'}`;
 
             const comments = await github.rest.issues.listComments({
               owner: context.repo.owner,
