@@ -9,8 +9,6 @@ public static DataWrapper getEmployeeDetail(String dataType, Boolean isSingle) {
         returnValue.isSingle = isSingle;
         returnValue.recordId = (String) returnValue.records[0].get('Id');
         returnValue.tableColumns = null;
-        System.debug('Return value ' +returnValue.columns);
-        System.debug('Return oinijhe ' +returnValue.isSingle);
     } 
     return returnValue; 
 }
