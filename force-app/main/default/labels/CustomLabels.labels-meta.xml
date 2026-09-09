@@ -7,4 +7,11 @@
         <shortDescription>POC_Test_Label</shortDescription>
         <value>test</value>
     </labels>
+    <labels>
+        <fullName>Test</fullName>
+        <language>en_US</language>
+        <protected>false</protected>
+        <shortDescription>Test</shortDescription>
+        <value>test</value>
+    </labels>
 </CustomLabels>
