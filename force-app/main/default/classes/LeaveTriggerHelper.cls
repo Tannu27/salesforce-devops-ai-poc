@@ -14,7 +14,6 @@ public class LeaveTriggerHelper {
             }
         }
         if (!empUpdateList.isEmpty()) {
-            System.debug('test ::' + empUpdateList);
             update empUpdateList;
         }
     }
