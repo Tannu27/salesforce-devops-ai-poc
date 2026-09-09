@@ -38,6 +38,7 @@ jobs:
       - name: Authenticate QA Org
         run: |
           echo "${{ secrets.SFDX_AUTH_URL_QA }}" > auth.txt
+
           sf org login sfdx-url \
             --sfdx-url-file auth.txt \
             --alias qa \
@@ -46,12 +47,10 @@ jobs:
       - name: Run Code Analyzer
         continue-on-error: true
         run: |
-          if [ -f force-app/main/default/classes/LeaveTriggerHelper.cls ]; then
-            sf scanner run \
-              --target force-app/main/default/classes/LeaveTriggerHelper.cls \
-              --severity-threshold 3 \
-              --format table
-          fi
+          sf scanner run \
+            --target force-app/main/default/classes \
+            --severity-threshold 3 \
+            --format table || true
 
       - name: Generate Delta Package
         run: |
@@ -70,25 +69,123 @@ jobs:
         run: |
           if grep -q "<types>" delta/package/package.xml; then
             echo "has_changes=true" >> $GITHUB_OUTPUT
-            echo "Salesforce metadata changes found."
           else
             echo "has_changes=false" >> $GITHUB_OUTPUT
-            echo "No Salesforce metadata changes found."
           fi
 
-      - name: Validate Deployment
-        if: steps.delta_check.outputs.has_changes == 'true'
+      - name: Determine Test Classes
+        id: test_selection
         run: |
+
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+          TEST_ARGS=""
+          APEX_CHANGED=false
+
+          CHANGED_CLASSES=$(git diff --name-only origin/${{ github.base_ref }} HEAD \
+            | grep "force-app/main/default/classes/.*\.cls$" \
+            | grep -v "Test.cls$" || true)
+
+          echo "Changed Apex Classes:"
+          echo "$CHANGED_CLASSES"
+
+          if [ ! -z "$CHANGED_CLASSES" ]; then
+            APEX_CHANGED=true
+          fi
+
+          for FILE in $CHANGED_CLASSES
+          do
+
+            CLASS_NAME=$(basename "$FILE" .cls)
+
+            echo "Processing: $CLASS_NAME"
+
+            TEST_CLASS=""
+
+            if [ -f "force-app/main/default/classes/${CLASS_NAME}Test.cls" ]; then
+
+              TEST_CLASS="${CLASS_NAME}Test"
+              echo "Convention test found: $TEST_CLASS"
+
+            elif [ -f ".github/test-mapping.json" ]; then
+
+              TEST_CLASS=$(jq -r --arg cls "$CLASS_NAME" '.[$cls]' .github/test-mapping.json)
+
+              if [ "$TEST_CLASS" = "null" ]; then
+                TEST_CLASS=""
+              fi
+
+              if [ ! -z "$TEST_CLASS" ]; then
+                echo "Mapped test found: $TEST_CLASS"
+              fi
+
+            fi
+
+            if [ ! -z "$TEST_CLASS" ]; then
+
+              if [[ "$TEST_ARGS" != *"--tests $TEST_CLASS"* ]]; then
+                TEST_ARGS="$TEST_ARGS --tests $TEST_CLASS"
+              fi
+
+            fi
+
+          done
+
+          echo "Final Test Args:"
+          echo "$TEST_ARGS"
+
+          if [ ! -z "$TEST_ARGS" ]; then
+
+            echo "validation_mode=specified" >> $GITHUB_OUTPUT
+            echo "test_args=$TEST_ARGS" >> $GITHUB_OUTPUT
+
+          elif [ "$APEX_CHANGED" = "true" ]; then
+
+            echo "validation_mode=missing_tests" >> $GITHUB_OUTPUT
+
+          else
+
+            echo "validation_mode=notest" >> $GITHUB_OUTPUT
+
+          fi
+
+      - name: Fail When Apex Has No Test Mapping
+        if: steps.test_selection.outputs.validation_mode == 'missing_tests'
+        run: |
+          echo "Apex class changed but no test class could be determined."
+          echo "Create <ClassName>Test.cls or add mapping in .github/test-mapping.json"
+          exit 1
+
+      - name: Validate Deployment - Specified Tests
+        if: steps.delta_check.outputs.has_changes == 'true' && steps.test_selection.outputs.validation_mode == 'specified'
+        run: |
+
+          echo "Running tests:"
+          echo "${{ steps.test_selection.outputs.test_args }}"
+
           sf project deploy validate \
             --manifest delta/package/package.xml \
             --target-org qa \
             --test-level RunSpecifiedTests \
-            --tests LeaveTriggerTest
+            ${{ steps.test_selection.outputs.test_args }}
+
+      - name: Validate Deployment - No Test Run
+        if: steps.delta_check.outputs.has_changes == 'true' && steps.test_selection.outputs.validation_mode == 'notest'
+        run: |
+
+          echo "No Apex classes changed."
+          echo "Running NoTestRun."
+
+          sf project deploy validate \
+            --manifest delta/package/package.xml \
+            --target-org qa \
+            --test-level NoTestRun
 
       - name: Skip Validation
         if: steps.delta_check.outputs.has_changes == 'false'
         run: |
-          echo "Skipping deployment validation because no Salesforce metadata changed."
+          echo "No metadata changes found."
 
       - name: Validation Success Comment
         if: success()
@@ -96,7 +193,7 @@ jobs:
         with:
           script: |
             const body =
-              "## 🚀 PR Validation Result\n\n✅ PR Validation Passed";
+              "## PR Validation Result\n\n✅ PR Validation Passed";
 
             const comments = await github.rest.issues.listComments({
               owner: context.repo.owner,
@@ -105,7 +202,7 @@ jobs:
             });
 
             const existing = comments.data.find(
-              c => c.body.includes("## 🚀 PR Validation Result")
+              c => c.body.includes("## PR Validation Result")
             );
 
             if (existing) {
@@ -113,14 +210,14 @@ jobs:
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 comment_id: existing.id,
-                body: body
+                body
               });
             } else {
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: context.issue.number,
-                body: body
+                body
               });
             }
 
@@ -130,7 +227,7 @@ jobs:
         with:
           script: |
             const body =
-              "## 🚀 PR Validation Result\n\n❌ PR Validation Failed. Check GitHub Actions logs.";
+              "## PR Validation Result\n\n❌ PR Validation Failed. Check GitHub Actions logs.";
 
             const comments = await github.rest.issues.listComments({
               owner: context.repo.owner,
@@ -139,7 +236,7 @@ jobs:
             });
 
             const existing = comments.data.find(
-              c => c.body.includes("## 🚀 PR Validation Result")
+              c => c.body.includes("## PR Validation Result")
             );
 
             if (existing) {
@@ -147,13 +244,13 @@ jobs:
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 comment_id: existing.id,
-                body: body
+                body
               });
             } else {
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: context.issue.number,
-                body: body
+                body
               });
             }

@@ -1,0 +1,20 @@
+{
+  "ChangePasswordController": "ChangePasswordControllerTest",
+  "CommunitiesLandingController": "CommunitiesLandingControllerTest",
+  "CommunitiesLoginController": "CommunitiesLoginControllerTest",
+  "CommunitiesSelfRegConfirmController": "CommunitiesSelfRegConfirmControllerTest",
+  "CommunitiesSelfRegController": "CommunitiesSelfRegControllerTest",
+  "EmployeeHierarchyController": "EmployeeHierarchyControllerTest",
+  "EmployeePortalController": "EmployeePortalControllerTest",
+  "EmployeePortalDataController": "EmployeePortalDataControllerTest",
+  "FetchEmpDetails": "FetchEmpDetailsTest",
+  "ForgotPasswordController": "ForgotPasswordControllerTest",
+  "LeaveTrigger": "LeaveTriggerTest",
+  "LeaveTriggerHandler": "LeaveTriggerTest",
+  "LeaveTriggerHelper": "LeaveTriggerTest",
+  "MicrobatchSelfRegController": "MicrobatchSelfRegControllerTest",
+  "MyProfilePageController": "MyProfilePageControllerTest",
+  "SiteLoginController": "SiteLoginControllerTest",
+  "SiteRegisterController": "SiteRegisterControllerTest",
+  "TrainingController": "TrainingControllerTest"
+}
