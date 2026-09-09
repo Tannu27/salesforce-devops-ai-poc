@@ -13,9 +13,7 @@ public class LeaveTriggerHelper {
                 }
             }
         }
-        if (!empUpdateList.isEmpty()){
-            // POC-001: Leave Trigger Enhancement
-            System.debug('test ::' + empUpdateList);
+        if (!empUpdateList.isEmpty()) {
             update empUpdateList;
         }
     }
