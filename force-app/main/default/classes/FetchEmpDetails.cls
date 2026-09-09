@@ -1,17 +1,17 @@
 public with sharing class FetchEmpDetails {
-@AuraEnabled(cacheable = true)
-public static DataWrapper getEmployeeDetail(String dataType, Boolean isSingle) {
-    DataWrapper returnValue = new DataWrapper();
-    Employee_Portal__mdt epMtd = Employee_Portal__mdt.getInstance(dataType); 
-    if (dataType == 'Employee') {
-        returnValue.records = getEmployeeData(epMtd, isSingle);
-        returnValue.columns = epMtd.Columns__c.split(',');
-        returnValue.isSingle = isSingle;
-        returnValue.recordId = (String) returnValue.records[0].get('Id');
-        returnValue.tableColumns = null;
-    } 
-    return returnValue; 
-}
+    @AuraEnabled(cacheable = true)
+    public static DataWrapper getEmployeeDetail(String dataType, Boolean isSingle) {
+        DataWrapper returnValue = new DataWrapper();
+        Employee_Portal__mdt epMtd = Employee_Portal__mdt.getInstance(dataType); 
+        if (dataType == 'Employee') {
+            returnValue.records = getEmployeeData(epMtd, isSingle);
+            returnValue.columns = epMtd.Columns__c.split(',');
+            returnValue.isSingle = isSingle;
+            returnValue.recordId = (String) returnValue.records[0].get('Id');
+            returnValue.tableColumns = null;
+        } 
+        return returnValue; 
+    }
 @AuraEnabled(cacheable = true)
 public static DataWrapper getCompensationDetail(String dataType, Boolean isSingle) {
     DataWrapper returnValue = new DataWrapper();
