@@ -10,6 +10,8 @@ public with sharing class EmployeePortalController {
             returnValue.isSingle = isSingle;
             returnValue.recordId = (String) returnValue.records[0].get('Id');
         }
+        // devops center test 
+        System.debug('returnValue : ' + returnValue);
         return returnValue;
     }
     
