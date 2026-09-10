@@ -14,7 +14,6 @@ public class LeaveTriggerHelper {
             }
         }
         if (!empUpdateList.isEmpty()) {
-            // DevOps Center POC Test
             update empUpdateList;
         }
     }
