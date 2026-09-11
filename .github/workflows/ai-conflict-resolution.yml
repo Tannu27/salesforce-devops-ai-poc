@@ -76,28 +76,42 @@ jobs:
 
           echo "# Merge Conflict Analysis" > conflicts.txt
 
-          git diff \
-            ${{ github.base_ref }} \
-            ${{ github.head_ref }} \
-            --name-only > changed-files.txt
+          FILES=$(grep "^  their" merge-result.txt | awk '{print $NF}')
+
+          echo "===== CONFLICT FILES ====="
+          echo "$FILES"
+
+          if [ -z "$FILES" ]; then
+            echo "No conflicting files found" >> conflicts.txt
+          fi
 
           while read FILE
           do
             echo "" >> conflicts.txt
-            echo "==========================" >> conflicts.txt
             echo "FILE: $FILE" >> conflicts.txt
-            echo "==========================" >> conflicts.txt
+            echo "" >> conflicts.txt
+
+            echo "BASE:" >> conflicts.txt
+            git show ${{ github.base_ref }}:"$FILE" \
+              2>/dev/null | head -50 >> conflicts.txt || true
 
             echo "" >> conflicts.txt
-            echo "--- BASE VERSION ---" >> conflicts.txt
-            git show ${{ github.base_ref }}:"$FILE" 2>/dev/null >> conflicts.txt || true
+
+            echo "PR:" >> conflicts.txt
+            git show ${{ github.head_ref }}:"$FILE" \
+              2>/dev/null | head -50 >> conflicts.txt || true
 
             echo "" >> conflicts.txt
-            echo "--- PR VERSION ---" >> conflicts.txt
-            git show ${{ github.head_ref }}:"$FILE" 2>/dev/null >> conflicts.txt || true
 
-          done < changed-files.txt
+          done <<< "$FILES"
 
+          echo "===== CONFLICT CONTEXT ====="
+          cat conflicts.txt
+
+      - name: Debug Prompt
+        if: steps.conflict_check.outputs.conflict == 'true'
+        run: |
+          echo "===== CONFLICTS.TXT ====="
           cat conflicts.txt
 
       - name: Ask Gemini For Resolution
@@ -116,18 +130,20 @@ jobs:
                   parts: [
                     {
                       text:
-                      ("You are a senior Salesforce DevOps Architect.
-                      
-                      A pull request has merge conflicts.
+                      ("You are a merge conflict resolver.
 
-                      Return:
+                      Analyze ONLY the files shown below.
+
+                      Do not discuss GitHub Actions,
+                      workflows,
+                      CI/CD pipelines,
+                      or any files not listed.
+
+                      Return only:
 
                       1. Conflict Summary
                       2. Recommended Resolution
-                      3. Final Merged Code
-                      4. Why this resolution is safest
-
-                      Files:
+                      3. Final Merged Content
 
                       " + $conflict)
                     }
