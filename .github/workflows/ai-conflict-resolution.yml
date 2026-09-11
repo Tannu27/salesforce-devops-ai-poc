@@ -1,0 +1,117 @@
+name: AI Merge Conflict Assistant
+
+on:
+  pull_request:
+    types:
+      - synchronize
+      - opened
+      - reopened
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  conflict-analysis:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch Base Branch
+        run: |
+          git fetch origin ${{ github.base_ref }}
+
+      - name: Check For Merge Conflicts
+        id: conflict_check
+        run: |
+
+          git merge-tree \
+            $(git merge-base HEAD origin/${{ github.base_ref }}) \
+            HEAD \
+            origin/${{ github.base_ref }} > merge-result.txt
+
+          if grep -q "<<<<<<<" merge-result.txt; then
+            echo "conflict=true" >> $GITHUB_OUTPUT
+          else
+            echo "conflict=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Extract Conflict Block
+        if: steps.conflict_check.outputs.conflict == 'true'
+        run: |
+          cp merge-result.txt conflicts.txt
+
+      - name: Ask Gemini For Resolution
+        if: steps.conflict_check.outputs.conflict == 'true'
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+
+          CONFLICT=$(cat conflicts.txt)
+
+          jq -n \
+            --arg conflict "$CONFLICT" \
+            '{
+              contents: [
+                {
+                  parts: [
+                    {
+                      text:
+                      ("You are a Salesforce DevOps Architect. Resolve this merge conflict and explain the best resolution:\n\n" + $conflict)
+                    }
+                  ]
+                }
+              ]
+            }' > request.json
+
+          curl -s \
+            -X POST \
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d @request.json \
+            > response.json
+
+      - name: Parse Gemini Response
+        if: steps.conflict_check.outputs.conflict == 'true'
+        run: |
+
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+          jq -r \
+            '.candidates[0].content.parts[0].text' \
+            response.json \
+            > suggestion.txt
+
+      - name: Comment On PR
+        if: steps.conflict_check.outputs.conflict == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+
+            const fs = require('fs');
+
+            const suggestion =
+              fs.readFileSync('suggestion.txt', 'utf8');
+
+            const body =
+              "## AI Merge Conflict Analysis\n\n" +
+              suggestion;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body
+            });
+
+      - name: No Conflicts
+        if: steps.conflict_check.outputs.conflict == 'false'
+        run: |
+          echo "No merge conflicts detected."

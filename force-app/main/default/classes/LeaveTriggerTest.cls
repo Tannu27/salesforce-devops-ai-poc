@@ -48,7 +48,6 @@ public class LeaveTriggerTest {
     }
 
     static testMethod void testDelete() {
-    
         Employee__c empRecord = new Employee__c(
             Leave_Balance__c = 20,
             orgChartId__c = 21,
