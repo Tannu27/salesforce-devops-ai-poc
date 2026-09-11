@@ -1,11 +1,13 @@
 name: AI Merge Conflict Assistant
 
 on:
+  workflow_dispatch:
+
   pull_request_target:
     types:
-      - synchronize
       - opened
       - reopened
+      - synchronize
 
 permissions:
   contents: read
