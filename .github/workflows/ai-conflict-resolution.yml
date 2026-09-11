@@ -20,25 +20,52 @@ jobs:
 
     steps:
 
-      - name: Checkout Repository
+      - name: Checkout PR Branch
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
-      - name: Fetch Base Branch
+      - name: Fetch Branches
         run: |
-          git fetch origin ${{ github.base_ref }}
+          git fetch origin ${{ github.base_ref }}:${{ github.base_ref }}
+          git fetch origin ${{ github.head_ref }}:${{ github.head_ref }}
+
+      - name: Debug Context
+        run: |
+          echo "EVENT: ${{ github.event_name }}"
+          echo "BASE: ${{ github.base_ref }}"
+          echo "HEAD REF: ${{ github.head_ref }}"
+          git branch -a
+          git log --oneline -5
+
+      - name: Verify PR Context
+        run: |
+          echo "BASE=${{ github.base_ref }}"
+          echo "HEAD=${{ github.head_ref }}"
+          echo "MERGEABLE=${{ github.event.pull_request.mergeable }}"
 
       - name: Check For Merge Conflicts
         id: conflict_check
         run: |
 
-          git merge-tree \
-            $(git merge-base HEAD origin/${{ github.base_ref }}) \
-            HEAD \
-            origin/${{ github.base_ref }} > merge-result.txt
+          BASE=$(git merge-base \
+            ${{ github.head_ref }} \
+            ${{ github.base_ref }})
 
-          if grep -q "<<<<<<<" merge-result.txt; then
+          echo "BASE COMMIT:"
+          echo $BASE
+
+          git merge-tree \
+            $BASE \
+            ${{ github.head_ref }} \
+            ${{ github.base_ref }} \
+            > merge-result.txt
+
+          echo "===== MERGE TREE OUTPUT ====="
+          cat merge-result.txt
+
+          if grep -Eiq "changed in both|conflict|<<<<<<<"; then
             echo "conflict=true" >> $GITHUB_OUTPUT
           else
             echo "conflict=false" >> $GITHUB_OUTPUT
@@ -48,6 +75,12 @@ jobs:
         if: steps.conflict_check.outputs.conflict == 'true'
         run: |
           cp merge-result.txt conflicts.txt
+
+      - name: Check GitHub Mergeability
+        id: mergeability
+        run: |
+          echo "mergeable=${{ github.event.pull_request.mergeable }}" >> $GITHUB_OUTPUT
+          echo "MERGEABLE=${{ github.event.pull_request.mergeable }}"
 
       - name: Ask Gemini For Resolution
         if: steps.conflict_check.outputs.conflict == 'true'
