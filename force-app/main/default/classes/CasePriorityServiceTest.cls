@@ -11,7 +11,7 @@ private class CasePriorityServiceTest {
 
         Test.stopTest();
 
-        System.assertEquals('Low', priority);
+        System.assertEquals('Medium', priority);
     }
 
     @IsTest

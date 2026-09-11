@@ -5,6 +5,9 @@ public class FetchEmpDetailsTest {
         empRecord.First_Name__c = 'Test Emplyee';
         empRecord.Email__c = 'test@test.com';
         empRecord.Connected_User__c = UserInfo.getUserId();
+        empRecord.orgChartId__c = 31;
+        empRecord.Emergency_Contact_Relation__c = 'Father';
+        empRecord.Emergency_Contact_Number__c = '9999999999';
         insert empRecord;        
         
         Compensation__c compRecord = new Compensation__c();
@@ -43,7 +46,7 @@ public class FetchEmpDetailsTest {
         test.stopTest();
     }
 
-@isTest
+	@isTest
     static void validateGetCompensationDetail() {
         Compensation__c compRec = [SELECT id, Basic_Salary__c, Employee__c FROM Compensation__c ];
         //System.AssertEquals(compRec.Employee__c, );
@@ -53,15 +56,5 @@ public class FetchEmpDetailsTest {
          FetchEmpDetails.getCompensationDetail('Leave', false);
          FetchEmpDetails.getCompensationDetail('Holiday', false);
         test.stopTest();
-        
-         /*Holiday holidayRecord = [SELECT id, Name, Description FROM Holiday ];
-        //System.AssertEquals(compRec.Employee__c, );
-        test.startTest();
-         FetchEmpDetails.getCompensationDetail('Holiday', false);*/
-        
-        //test.stopTest();
-         
-        //System.AssertEquals(compRec.Employee__c, );
-       
     }    
 }
