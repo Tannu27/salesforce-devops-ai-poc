@@ -112,6 +112,12 @@ jobs:
             -d @request.json \
             > response.json
 
+      - name: Debug Gemini Response
+        if: steps.conflict_check.outputs.conflict == 'true'
+        run: |
+          echo "===== GEMINI RESPONSE ====="
+          cat response.json
+
       - name: Parse Gemini Response
         if: steps.conflict_check.outputs.conflict == 'true'
         run: |
@@ -119,10 +125,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y jq
 
-          jq -r \
-            '.candidates[0].content.parts[0].text' \
-            response.json \
-            > suggestion.txt
+          if jq -e '.candidates[0].content.parts[0].text' response.json > /dev/null; then
+            jq -r \
+              '.candidates[0].content.parts[0].text' \
+              response.json \
+              > suggestion.txt
+          else
+            echo "Gemini did not return a valid response." > suggestion.txt
+            cat response.json >> suggestion.txt
+          fi
 
       - name: Comment On PR
         if: steps.conflict_check.outputs.conflict == 'true'
