@@ -118,7 +118,7 @@ jobs:
                       text:
                       ("You are a senior Salesforce DevOps Architect.
                       
-                      A pull request has merge conflicts..
+                      A pull request has merge conflicts.
 
                       Return:
 
