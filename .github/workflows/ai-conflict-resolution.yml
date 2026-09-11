@@ -1,11 +1,13 @@
 name: AI Merge Conflict Assistant
 
 on:
-  pull_request:
+  workflow_dispatch:
+
+  pull_request_target:
     types:
-      - synchronize
       - opened
       - reopened
+      - synchronize
 
 permissions:
   contents: read
@@ -18,34 +20,85 @@ jobs:
 
     steps:
 
-      - name: Checkout Repository
+      - name: Checkout PR Branch
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
-      - name: Fetch Base Branch
+      - name: Fetch Branches
         run: |
-          git fetch origin ${{ github.base_ref }}
+          git fetch origin ${{ github.base_ref }}:${{ github.base_ref }}
+          git fetch origin ${{ github.head_ref }}:${{ github.head_ref }}
+
+      - name: Debug Context
+        run: |
+          echo "EVENT: ${{ github.event_name }}"
+          echo "BASE: ${{ github.base_ref }}"
+          echo "HEAD REF: ${{ github.head_ref }}"
+          git branch -a
+          git log --oneline -5
+
+      - name: Verify PR Context
+        run: |
+          echo "BASE=${{ github.base_ref }}"
+          echo "HEAD=${{ github.head_ref }}"
+          echo "MERGEABLE=${{ github.event.pull_request.mergeable }}"
 
       - name: Check For Merge Conflicts
         id: conflict_check
         run: |
 
-          git merge-tree \
-            $(git merge-base HEAD origin/${{ github.base_ref }}) \
-            HEAD \
-            origin/${{ github.base_ref }} > merge-result.txt
+          BASE=$(git merge-base \
+            ${{ github.head_ref }} \
+            ${{ github.base_ref }})
 
-          if grep -q "<<<<<<<" merge-result.txt; then
+          echo "BASE COMMIT: $BASE"
+
+          git merge-tree \
+            $BASE \
+            ${{ github.head_ref }} \
+            ${{ github.base_ref }} \
+            > merge-result.txt
+
+          echo "===== MERGE TREE OUTPUT ====="
+          cat merge-result.txt
+
+          if grep -Eiq "changed in both|CONFLICT|<<<<<<<" merge-result.txt; then
             echo "conflict=true" >> $GITHUB_OUTPUT
           else
             echo "conflict=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Extract Conflict Block
+      - name: Build Conflict Context
         if: steps.conflict_check.outputs.conflict == 'true'
         run: |
-          cp merge-result.txt conflicts.txt
+
+          echo "# Merge Conflict Analysis" > conflicts.txt
+
+          git diff \
+            ${{ github.base_ref }} \
+            ${{ github.head_ref }} \
+            --name-only > changed-files.txt
+
+          while read FILE
+          do
+            echo "" >> conflicts.txt
+            echo "==========================" >> conflicts.txt
+            echo "FILE: $FILE" >> conflicts.txt
+            echo "==========================" >> conflicts.txt
+
+            echo "" >> conflicts.txt
+            echo "--- BASE VERSION ---" >> conflicts.txt
+            git show ${{ github.base_ref }}:"$FILE" 2>/dev/null >> conflicts.txt || true
+
+            echo "" >> conflicts.txt
+            echo "--- PR VERSION ---" >> conflicts.txt
+            git show ${{ github.head_ref }}:"$FILE" 2>/dev/null >> conflicts.txt || true
+
+          done < changed-files.txt
+
+          cat conflicts.txt
 
       - name: Ask Gemini For Resolution
         if: steps.conflict_check.outputs.conflict == 'true'
@@ -63,7 +116,20 @@ jobs:
                   parts: [
                     {
                       text:
-                      ("You are a Salesforce DevOps Architect. Resolve this merge conflict and explain the best resolution:\n\n" + $conflict)
+                      ("You are a senior Salesforce DevOps Architect.
+                      
+                      A pull request has merge conflicts.
+
+                      Return:
+
+                      1. Conflict Summary
+                      2. Recommended Resolution
+                      3. Final Merged Code
+                      4. Why this resolution is safest
+
+                      Files:
+
+                      " + $conflict)
                     }
                   ]
                 }
@@ -72,10 +138,29 @@ jobs:
 
           curl -s \
             -X POST \
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}" \
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${GEMINI_API_KEY}" \
             -H "Content-Type: application/json" \
             -d @request.json \
             > response.json
+
+      - name: Validate Gemini Response
+        if: steps.conflict_check.outputs.conflict == 'true'
+        run: |
+
+          echo "===== GEMINI RESPONSE ====="
+          cat response.json
+
+          if jq -e '.error' response.json > /dev/null; then
+            echo "Gemini API returned an error"
+            cat response.json
+            exit 1
+          fi
+
+      - name: Debug Gemini Response
+        if: steps.conflict_check.outputs.conflict == 'true'
+        run: |
+          echo "===== GEMINI RESPONSE ====="
+          cat response.json
 
       - name: Parse Gemini Response
         if: steps.conflict_check.outputs.conflict == 'true'
@@ -84,10 +169,25 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y jq
 
-          jq -r \
-            '.candidates[0].content.parts[0].text' \
-            response.json \
-            > suggestion.txt
+          if jq -e '.candidates[0].content.parts[0].text' response.json > /dev/null; then
+
+            jq -r \
+              '.candidates[0].content.parts[0].text' \
+              response.json \
+              > suggestion.txt
+
+          else
+
+            echo "Gemini did not return a valid response." \
+              > suggestion.txt
+
+            cat response.json \
+              >> suggestion.txt
+
+          fi
+
+          echo "===== SUGGESTION ====="
+          cat suggestion.txt
 
       - name: Comment On PR
         if: steps.conflict_check.outputs.conflict == 'true'
