@@ -129,23 +129,21 @@ jobs:
                 {
                   parts: [
                     {
-                      text:
-                      ("You are a merge conflict resolver.
+                     text:
+                    ("You are a merge conflict resolver.
 
-                      Analyze ONLY the files shown below.
+                    Analyze ONLY the files below.
 
-                      Do not discuss GitHub Actions,
-                      workflows,
-                      CI/CD pipelines,
-                      or any files not listed.
+                    Rules:
+                    - Use only the provided content.
+                    - Do not invent issues.
+                    - Do not mention encoding, BOM, security, workflows, CI/CD, or GitHub Actions.
+                    - If the conflict is a simple text replacement, state that directly.
+                    - Output markdown only.
 
-                      Return only:
+                    Files:
 
-                      1. Conflict Summary
-                      2. Recommended Resolution
-                      3. Final Merged Content
-
-                      " + $conflict)
+                    " + $conflict)
                     }
                   ]
                 }
@@ -217,7 +215,7 @@ jobs:
               fs.readFileSync('suggestion.txt', 'utf8');
 
             const body =
-              "## AI Merge Conflict Analysis\n\n" +
+              "## Merge Conflict Analysis\n\n" +
               suggestion;
 
             await github.rest.issues.createComment({
