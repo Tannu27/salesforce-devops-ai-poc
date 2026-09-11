@@ -65,7 +65,7 @@ jobs:
           echo "===== MERGE TREE OUTPUT ====="
           cat merge-result.txt
 
-          if grep -Eiq "changed in both|conflict|<<<<<<<"; then
+          if grep -Eiq "changed in both|conflict|<<<<<<<" merge-result.txt; then
             echo "conflict=true" >> $GITHUB_OUTPUT
           else
             echo "conflict=false" >> $GITHUB_OUTPUT
