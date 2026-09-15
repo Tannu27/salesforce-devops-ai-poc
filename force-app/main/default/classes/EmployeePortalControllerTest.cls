@@ -4,10 +4,12 @@ public class EmployeePortalControllerTest {
     @testSetup 
     static void setup() {
         Employee__c empRecord = new Employee__c();
-        empRecord.First_Name__c = 'Test Emplyee';
+        empRecord.First_Name__c = ' Test Emplyee';
         empRecord.Email__c = 'test@test.com';
         empRecord.Performance_Flag__c = 'Green';
         empRecord.orgChartId__c = 123;
+        empRecord.Emergency_Contact_Relation__c = 'Father';
+        empRecord.Emergency_Contact_Number__c = '9999999999';
         empRecord.Connected_User__c = UserInfo.getUserId();
         
         insert empRecord;        
