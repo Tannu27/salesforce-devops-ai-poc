@@ -8,6 +8,8 @@ public class EmployeePortalControllerTest {
         empRecord.Email__c = 'test@test.com';
         empRecord.Performance_Flag__c = 'Green';
         empRecord.orgChartId__c = 123;
+        empRecord.Emergency_Contact_Relation__c = 'Father';
+        empRecord.Emergency_Contact_Number__c = '9999999999';
         empRecord.Connected_User__c = UserInfo.getUserId();
         
         insert empRecord;        
