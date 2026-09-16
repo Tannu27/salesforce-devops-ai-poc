@@ -12,7 +12,7 @@ public with sharing class CasePriorityService {
             }
         }
 
-        return 'Medium';
+        return 'Low';
     }
 
     public static void updateCasePriority(List<Case> casesToUpdate) {
